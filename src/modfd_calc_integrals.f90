@@ -12,8 +12,8 @@ SUBROUTINE fd_calc_integrals
 !--estimation of discretization errors
 USE precision,        ONLY : r_single
 USE real_parameters,  ONLY : zero,real_1e3,pi,one,three,ten,four
-USE shared_data,      ONLY : ien,lcal,li,nim,njm,visc,prr,r,y,xc,pp,f1,f2,ni,nj,t,imon,p,&
-                             nsphere,lcal,ien,putobj,objtp,cpm,flomas,dt,objradius,prm,u,objbradius
+USE shared_data,      ONLY : ien,lcal,li,nim,njm,visc,r,y,xc,pp,f1,f2,ni,nj,t,imon,p,&
+                             nsphere,lcal,ien,putobj,objtp,cpf,kappaf,flomas,dt,objradius,cpf,u,objbradius,celkappa
 USE parameters,       ONLY : out_unit
 
 IMPLICIT NONE 
@@ -29,7 +29,7 @@ IF(lcal(ien)) THEN
   DO j=2,njm
     ij=li(1)+j
     s=0.5*(r(j)+r(j-1))*(y(j)-y(j-1))
-    d=visc*prr*s/(xc(2)-xc(1))
+    d=celkappa(ij)*s/(xc(2)-xc(1))
     qwall=qwall+d*(t(ij+nj)-t(ij))
   END DO
   WRITE(out_unit,*) '  HEAT FLUX THROUGH WEST WALL: ',qwall
@@ -38,7 +38,7 @@ IF(lcal(ien)) THEN
   DO j=2,njm
     ij=li(ni)+j
     s=0.5*(r(j)+r(j-1))*(y(j)-y(j-1))
-    d=visc*prr*s/(xc(ni)-xc(nim))
+    d=celkappa(ij)*s/(xc(ni)-xc(nim))
     qwall=qwall+d*(t(ij)-t(ij-nj))
   END DO
   WRITE(out_unit,*) '  HEAT FLUX THROUGH EAST WALL: ',qwall
@@ -129,8 +129,7 @@ ENDIF
       tw = objtp(1)
       lmtd = ((tw - tmeani) - (tw - tmeano))/LOG((tw - tmeani)/(tw - tmeano)) 
       
-      !--cpm assumed 1.0
-      qm = flomas*(tmeano - tmeani)
+      qm = cpf*flomas*(tmeano - tmeani)
       
       !--calc total heat transfer area
       area = zero
@@ -141,8 +140,8 @@ ENDIF
 
       !--calculate mean heat transfer coefficient and mean nusselt number
       hm = qm/area/lmtd
-      !--cpm assumed 1.0 and all tube with same diameter
-      num = hm * (y(nj) - y(1))/(visc/prm)
+
+      num = hm * (y(nj) - y(1))/kappaf
 
       WRITE(out_unit,*) '  '
       WRITE(out_unit,*) '  Mean temp in, out, lmtd:  ',tmeani,tmeano,lmtd 

@@ -13,24 +13,24 @@ USE modfd_set_bc,       ONLY : fd_bcpressure
 USE shared_data,        ONLY : urf,ip,p,su,apu,apv,nim,njm,&
                                xc,ni,nj,li,fx,y,r,visc,su,&
                                u,v,ae,aw,an,as,fy,yc,x,lcal,ien,&
-                               den,deno,laxis,p,dtr,&
-                               gamt,sor,resor,nsw,f1,f2,dpx,dpy,&
+                               den,deno,laxis,p,dtr,nij,&
+                               gamt,sor,resor,nsw,f1,f2,ft1,ft2,dpx,dpy,&
                                ltime,ap,ipr,jpr,ltest,pp,fdsu,fdsv,&
                                dux,duy,dvx,dvy,fdsuc,fdsvc,fdsub,fdsvb,putobj,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,dt,&
-                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli
+                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celcp
 USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual,&
                                     fd_solve_cgs2d
 IMPLICIT NONE
-REAL(KIND = r_single) :: fxe,fxp,dxpe,s,d,fyn,fyp,dypn,&
+REAL(KIND = r_single) :: fxe,fxp,dxpe,s,d,difft,fyn,fyp,dypn,&
                          dx,dy,rp,ppe,ppw,ppn,pps,dpxel,&
                          uel,apue,ue,vole,voln,dpynl,vnl,apvn,&
                          vn,sum,ppo,dpxe,dpyn,pcor !,&
                          !duxel,duxe,dvynl,dvyn,fdsuce,fdsvcn,dfyn,dfxe,c,K
 
 INTEGER               :: ij,i,j,ije,ijn,ijpref,ipar(16),debug
-REAL                  :: fpar(16)
+REAL                  :: fpar(16),aet(nij),ant(nij)
 
 debug = 0
 !--EAST CV FACES (S - AREA, VOLE - VOLUME BETWEEN P AND E)
@@ -47,7 +47,7 @@ DO i=2,nim-1
     s=(y(j)-y(j-1))*(r(j)+r(j-1))*half
     vole=dxpe*s
     d=(den(ije)*fxe+den(ij)*fxp)*s
-     
+    difft=(celcp(ije)*den(ije)*fxe+celcp(ij)*den(ij)*fxp)*s 
     !--INTERPOLATED CELL FACE QUANTITIES (PRESSURE GRAD., U AND 1/AP)
     !--Note: pressure gradient is interpolated midway between P and E,
     !--since the gradient calculated at cell face is second order
@@ -79,6 +79,7 @@ DO i=2,nim-1
     ue=uel - pcor 
     
     f1(ij) = d*ue
+    ft1(ij) = difft*ue
 !    IF(putobj)THEN
 !      fdsuce = fdsuc(ije)*fxe+fdsuc(ij)*fxp
 !      fdsub(ij) = fdsuce*d*apue
@@ -86,6 +87,7 @@ DO i=2,nim-1
     !--COEFFICIENTS OF P' EQUATION, AE(P) AND AW(E)
     
     ae(ij)=-d*apue*s
+    aet(ij)=-difft*apue*s
     aw(ije)=ae(ij)
 
   END DO
@@ -105,7 +107,7 @@ DO j=2,njm-1
     s=(x(i)-x(i-1))*r(j)
     voln=s*dypn
     d=(den(ijn)*fyn+den(ij)*fyp)*s
-    
+    difft=(celcp(ijn)*den(ijn)*fyn+celcp(ij)*den(ij)*fyp)*s
     !--INTERPOLATED CELL-FACE QUANTITIES (PRESSURE GRAD., U AND 1/AP)
     dpynl=half*(dpy(ijn)+dpy(ij))
     vnl=v(ijn)*fyn+v(ij)*fyp
@@ -134,6 +136,7 @@ DO j=2,njm-1
     vn=vnl - pcor 
     
     f2(ij)=d*vn
+    ft2(ij)=difft*vn
 !    IF(putobj)THEN
 !      fdsvcn = fdsvc(ijn)*fyn+fdsvc(ij)*fyp    
 !      fdsvb(ij) = fdsvcn*d*apvn
@@ -141,6 +144,7 @@ DO j=2,njm-1
     !--COEFFICIENTS OF P' EQUATION, AN(P) AND AS(N)
 
     an(ij)=-d*apvn*s
+    ant(ij)=-difft*apvn*s
     as(ijn)=an(ij)
 
   END DO
@@ -228,6 +232,7 @@ ppo=pp(ijpref)
 DO i=2,nim-1
   DO ij=li(i)+2,li(i)+njm
     f1(ij)=f1(ij)+ae(ij)*(pp(ij+nj)-pp(ij))
+    ft1(ij)=ft1(ij)+aet(ij)*(pp(ij+nj)-pp(ij))
   END DO
 END DO
 
@@ -236,6 +241,7 @@ END DO
 DO i=2,nim
   DO ij=li(i)+2,li(i)+njm-1
     f2(ij)=f2(ij)+an(ij)*(pp(ij+1)-pp(ij))
+    ft2(ij)=ft2(ij)+ant(ij)*(pp(ij+1)-pp(ij))
   END DO
 END DO
 

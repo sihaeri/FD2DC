@@ -13,18 +13,18 @@ USE parameters,             ONLY : set_unit,alloc_create,nphi,grd_unit,max_char_
 USE precision,              ONLY : r_single
 USE shared_data,            ONLY : solver_type,NNZ,NCel,lli,itim,time,lread,lwrite,ltest,louts,loute,ltime,&
                                    maxit,imon,jmon,ipr,jpr,sormax,slarge,alfa,minit,&
-                                   densit,visc,prm,gravx,gravy,beta,tref,problem_name,problem_len,lamvisc,&
+                                   densit,visc,gravx,gravy,beta,tref,problem_name,problem_len,lamvisc,&
                                    ulid,tper,itst,nprt,dt,gamt,iu,iv,ip,ien,dtr,tper,&
-                                   nsw,lcal,sor,resor,urf,gds,om,prm,prr,nim,njm,ni,nj,&
+                                   nsw,lcal,sor,resor,urf,gds,om,cpf,kappaf,nim,njm,ni,nj,&
                                    li,x,y,xc,yc,fx,fy,laxis,r,nij,u,v,nsw,sor,lcal,p,t,th,tc,den,deno,&
-                                   vo,uo,to,title,duct,flomas,flomom,f1,stationary,celprr,celbeta,&  !--FD aspect
+                                   vo,uo,to,title,duct,flomas,flomom,f1,ft1,stationary,celbeta,celkappa,celcp,&  !--FD aspect
                                    objcentx,objcenty,objradius,putobj,nsurfpoints,read_fd_geom,&
                                    betap,prandtlp,movingmesh,forcedmotion,up,vp,omp,isotherm,objqp,objbradius,&
                                    densitp,fd_urf,mcellpercv,objtp,nsphere,calcsurfforce,& !--filament
                                    filgravx,filgravy,nfilpoints,nfil,densitfil,filbenrig,fillen,&
                                    filalpha,filbeta,filgamma,&
                                    filfirstposx,filfirstposy,fillasttheta,filnprt,filfr,& !--heat
-                                   nnusseltpoints,calclocalnusselt,deltalen,sphnprt,betap,&
+                                   nnusseltpoints,calclocalnusselt,deltalen,sphnprt,betap,kappap,cpp,&
                                    mpi_comm,Hypre_A,Hypre_b,Hypre_x,nprocs_mpi,myrank_mpi,& !--viscosity temperature dependance
                                    temp_visc,viscgamma,calclocalnusselt_ave,naverage_steps
 
@@ -40,7 +40,7 @@ REAL(KIND = r_single) :: uin,vin,pin,tin
 INTEGER               :: i,j,ij
 !REAL(KIND = r_single),ALLOCATABLE :: volp(:,:),q(:)
 
-solver_type = solver_sparsekit
+solver_type = solver_sip
 itim = 0
 time = zero
 naverage_steps = 0
@@ -50,7 +50,7 @@ CALL fd_alloc_solctrl_arrays(alloc_create)
 READ(set_unit,6)title
 READ(set_unit,*)lread,lwrite,ltest,laxis,louts,loute,ltime,duct
 READ(set_unit,*)maxit,minit,imon,jmon,ipr,jpr,sormax,slarge,alfa
-READ(set_unit,*)densit,visc,prm,gravx,gravy,beta,th,tc,tref
+READ(set_unit,*)densit,visc,cpf,kappaf,gravx,gravy,beta,th,tc,tref
 READ(set_unit,*)uin,vin,pin,tin,ulid,tper
 READ(set_unit,*)itst,nprt,dt,gamt
 
@@ -73,9 +73,10 @@ IF(putobj)THEN
     CALL fd_alloc_objprop_arrays(alloc_create)
     DO i = 1,nsphere
       IF(isotherm)THEN
-        READ(set_unit,*)objcentx(i),objcenty(i),objradius(i),objbradius(i),densitp(i),objtp(i),betap(i),prandtlp(i)
+        READ(set_unit,*)objcentx(i),objcenty(i),objradius(i),objbradius(i),densitp(i),objtp(i),betap(i),cpp(i),kappap(i)
       ELSE
-        READ(set_unit,*)objcentx(i),objcenty(i),objradius(i),objbradius(i),densitp(i),objtp(i),betap(i),prandtlp(i),objqp(i)
+        READ(set_unit,*)objcentx(i),objcenty(i),objradius(i),objbradius(i),densitp(i),objtp(i),betap(i),cpp(i),kappap(i),&
+                        objqp(i)
       ENDIF
       READ(set_unit,*)nsurfpoints(i),nnusseltpoints(i),mcellpercv(i)
     ENDDO
@@ -114,7 +115,7 @@ ien = 4
 
 dtr = one/dt !--dt inverse
 om = two*pi/tper !--omega (for oscilatory lid)
-prr = one/prm !--inverse prandtl
+!prr = one/prm !--inverse prandtl !not needed anymore
 
 READ(grd_unit,*) i
 READ(grd_unit,*) i
@@ -135,19 +136,18 @@ DO i=1,ni
 END DO
 
 
-IF(solver_type == solver_sparsekit .OR. solver_type == solver_hypre)THEN
-  !-----number of s-n faces + number of e-w faces + central coefficients
-  NCel = 0
-  DO i=2,nim
-    DO j=2,njm
-      NCel = NCel + 1
-      lli(li(i) + j) = NCel
-    ENDDO
+!-----number of s-n faces + number of e-w faces + central coefficients
+NCel = 0
+DO i=2,nim
+  DO j=2,njm
+    NCel = NCel + 1
+    lli(li(i) + j) = NCel
   ENDDO
+ENDDO
 
-  NNZ = 2*(njm - 2)*(nim - 1) + 2*(nim - 2)*(njm - 1) + NCel
-ENDIF
-IF(solver_type == solver_sparsekit)CALL fd_alloc_spkit_arrays(alloc_create)
+NNZ = 2*(njm - 2)*(nim - 1) + 2*(nim - 2)*(njm - 1) + NCel
+
+CALL fd_alloc_spkit_arrays(alloc_create)
 !IF(solver_type == solver_hypre)CALL solve_hypre_sys_init(mpi_comm,myrank_mpi,nprocs_mpi,ncel,Hypre_A,Hypre_b,Hypre_x) 
 
 !--cv centres
@@ -237,6 +237,7 @@ ELSE
      ij=li(1)+j 
      u(ij)=ulid
      f1(ij)=half*densit*(y(j)-y(j-1))*(r(j)+r(j-1))*u(ij)
+     ft1(ij)=half*densit*(y(j)-y(j-1))*(r(j)+r(j-1))*u(ij)
      flomas=flomas+f1(ij)
      flomom=flomom+f1(ij)*u(ij)
    END DO
@@ -264,7 +265,8 @@ END DO
 den  = densit
 deno = densit
 celbeta = beta
-celprr = prr
+celcp = cpf
+celkappa = kappaf
 lamvisc = visc
 
 IF(putobj)THEN
@@ -317,14 +319,15 @@ IF(putobj)THEN
 
   READ(sres_unit)((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
          ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
-         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(u(ij),ij=1,nij),&
+         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
+         (u(ij),ij=1,nij),&
          (v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
          (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
          (uoo(ij),ij=1,nij),(voo(ij),ij=1,nij),(too(ij),ij=1,nij),&
          (dpx(ij),ij=1,nij),(dpy(ij),ij=1,nij),(dux(ij),ij=1,nij),&
          (duy(ij),ij=1,nij),(dvx(ij),ij=1,nij),(dvy(ij),ij=1,nij),&
          (dtx(ij),ij=1,nij),(dty(ij),ij=1,nij),(den(ij),ij=1,nij),&
-         (deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celprr(ij),ij=1,nij),&
+         (deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celcp(ij),ij=1,nij),(celkappa(ij),ij=1,nij),&
          (fdsu(ij),ij=1,nij),(fdsv(ij),ij=1,nij),(fdsub(ij),ij=1,nij),&
          (fdsvb(ij),ij=1,nij),(fdsuc(ij),ij=1,nij),(fdsvc(ij),ij=1,nij),&
          (fdst(ij),ij=1,nij),(fdstc(ij),ij=1,nij),(lamvisc(ij),ij=1,nij)
@@ -512,7 +515,8 @@ ELSE
   ENDIF
   READ(sres_unit)((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
       ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
-      (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(u(ij),ij=1,nij),&
+      (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
+      (u(ij),ij=1,nij),&
       (v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
       (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij)
   REWIND sres_unit
@@ -603,8 +607,8 @@ END SUBROUTINE fd_alloc_spkit_arrays
 SUBROUTINE fd_print_problem_setup
 
 USE real_parameters, ONLY : zero
-USE shared_data,  ONLY : ulid,gravx,gravy,ni,li,t,prm,alfa,urf,gds,dt,gamt,tper,densit,visc,ien,&
-                         ltime,iu,iv,ip,lcal
+USE shared_data,  ONLY : ulid,gravx,gravy,ni,li,t,alfa,urf,gds,dt,gamt,tper,densit,visc,ien,&
+                         ltime,iu,iv,ip,lcal,cpf,kappaf
 USE parameters,   ONLY : out_unit
 IMPLICIT NONE 
 
@@ -618,7 +622,7 @@ IF(LCAL(IEN)) THEN
   WRITE(out_unit,*) '          GRAVITY IN Y-DIR.:  ',GRAVY
   WRITE(out_unit,*) '          HOT  WALL TEMPER.:  ',t(2)
   WRITE(out_unit,*) '          COLD WALL TEMPER.:  ',t(li(ni)+1)
-  WRITE(out_unit,*) '          PRANDTL NUMBER   :  ',PRM
+  WRITE(out_unit,*) '          Cpf, Kappaf      :  ',cpf, kappaf
 ENDIF
 WRITE(out_unit,*) '  '
 WRITE(out_unit,*) '          ALFA  PARAMETER  :  ',ALFA
@@ -654,8 +658,8 @@ SUBROUTINE fd_alloc_work_arrays(create_or_destroy)
 
 USE parameters,             ONLY : alloc_create,alloc_destroy,out_unit
 USE shared_data,            ONLY : nij,u,v,p,t,pp,uo,vo,to,uoo,voo,too,&
-                                   ap,an,as,ae,aw,su,sv,apu,apv,apt,f1,f2,dpx,dpy,&
-                                   dux,duy,dvx,dvy,dtx,dty,apt,den,deno,celbeta,celprr,lamvisc
+                                   ap,an,as,ae,aw,su,sv,apu,apv,apt,f1,f2,ft1,ft2,dpx,dpy,&
+                                   dux,duy,dvx,dvy,dtx,dty,apt,den,deno,celbeta,celcp,celkappa,lamvisc
 USE real_parameters,        ONLY : zero
 
 IMPLICIT NONE
@@ -664,9 +668,9 @@ INTEGER                 :: ierror
 
 IF(create_or_destroy == alloc_create)THEN
   ALLOCATE(u(nij),v(nij),t(nij),p(nij),pp(nij),to(nij),uo(nij),vo(nij),voo(nij),too(nij),uoo(nij),&
-           ap(nij),an(nij),as(nij),ae(nij),aw(nij),su(nij),sv(nij),apu(nij),apv(nij),f1(nij),f2(nij),&
+           ap(nij),an(nij),as(nij),ae(nij),aw(nij),su(nij),sv(nij),apu(nij),apv(nij),f1(nij),f2(nij),ft1(nij),ft2(nij),&
            dpx(nij),dpy(nij),dux(nij),duy(nij),dvx(nij),dvy(nij),dtx(nij),dty(nij),den(nij),deno(nij),&
-           celbeta(nij),celprr(nij),lamvisc(nij),STAT=ierror)
+           celbeta(nij),celcp(nij),celkappa(nij),lamvisc(nij),STAT=ierror)
   IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate working arrays.'
   u = zero
   v = zero
@@ -678,16 +682,16 @@ IF(create_or_destroy == alloc_create)THEN
   ap = zero;an = zero;as = zero;ae = zero;aw = zero
   su = zero;sv = zero
   apu = zero;apv = zero
-  f1 = zero;f2 = zero
+  f1 = zero;f2 = zero;ft1 = zero;ft2 = zero
   dpx = zero;dpy = zero
   dux = zero;duy = zero
   dvx = zero;dvy = zero
   dtx = zero;dty = zero
   den = zero;deno = zero
-  celbeta = zero;celprr = zero;lamvisc = zero
+  celbeta = zero;celcp = zero;celkappa = zero;lamvisc = zero
 ELSEIF(create_or_destroy == alloc_destroy)THEN
   DEALLOCATE(u,v,t,p,pp,to,uo,vo,voo,too,uoo,&
-           ap,an,as,ae,aw,su,sv,apu,apv,f1,f2,dpx,dpy,dux,duy,dvx,dvy,dtx,dty,apt,den,deno,celbeta,celprr,lamvisc)
+           ap,an,as,ae,aw,su,sv,apu,apv,f1,f2,ft1,ft2,dpx,dpy,dux,duy,dvx,dvy,dtx,dty,apt,den,deno,celbeta,lamvisc)
 ENDIF
 
 END SUBROUTINE fd_alloc_work_arrays
@@ -776,7 +780,7 @@ USE shared_data,      ONLY : nsphere,objtp,objqp,fd_urf,densitp,objcentx,objcent
                              objradius,objcentu,objcentv,objcentom,nsurfpoints,&
                              nobjcells,mcellpercv,nnusseltpoints,objcentmi,objvol,&
                              objcento,objcentxo,objcentyo,objcentvo,objcentuo,objcentomo,&
-                             betap,prandtlp,up,vp,omp,forcedmotion,stationary,isotherm,objbradius
+                             betap,up,vp,omp,forcedmotion,stationary,isotherm,objbradius,cpp,kappap
 USE real_parameters,  ONLY : zero
 
 IMPLICIT NONE
@@ -790,7 +794,8 @@ IF(create_or_destroy == alloc_create)THEN
           nsurfpoints(nsphere),nobjcells(nsphere),mcellpercv(nsphere),nnusseltpoints(nsphere),&
           objcentmi(nsphere),objvol(nsphere),objcento(4,nsphere),&
           objcentxo(nsphere),objcentyo(nsphere),objcentvo(nsphere),objcentuo(nsphere),&
-          objcentomo(nsphere),betap(nsphere),prandtlp(nsphere),objbradius(nsphere),STAT=ierror)
+          objcentomo(nsphere),betap(nsphere),objbradius(nsphere),cpp(nsphere),kappap(nsphere),&
+          STAT=ierror)
   IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate onject arrays.'
   IF(forcedmotion .OR. stationary)THEN
     ALLOCATE(up(nsphere),vp(nsphere),omp(nsphere))
@@ -805,12 +810,12 @@ IF(create_or_destroy == alloc_create)THEN
   densitp = zero;objcentv = zero; objcentom = zero; objcentmi = zero
   nsurfpoints = 0;nobjcells = 0;mcellpercv = zero;nnusseltpoints = 0;objvol = zero
   objcento = zero;objcentxo = zero ;objcentyo = zero
-  objcentvo = zero;objcentuo = zero;objcentomo = zero;betap = zero;prandtlp = zero
-  objbradius = zero
+  objcentvo = zero;objcentuo = zero;objcentomo = zero;betap = zero
+  objbradius = zero;cpp = zero;kappap = zero
 ELSEIF(create_or_destroy == alloc_destroy)THEN
   DEALLOCATE(objtp,densitp,objcentx,objcenty,objradius,objcentu,objcentv,objcentom,nsurfpoints,nobjcells,&
              mcellpercv,objcentmi,objvol,objcento,objcentxo,objcentyo,objcentvo,objcentuo,objcentomo,betap,&
-             prandtlp,objbradius)
+             objbradius,cpp,kappap)
   IF(forcedmotion .OR. stationary)DEALLOCATE(up,vp,omp)
   IF(.NOT. isotherm)DEALLOCATE(objqp)
 ENDIF
@@ -1092,14 +1097,15 @@ INTEGER       :: ij,nn,ik,i,j
 
   WRITE(eres_unit)((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
          ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
-         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(u(ij),ij=1,nij),&
+         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
+         (u(ij),ij=1,nij),&
          (v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
          (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
          (uoo(ij),ij=1,nij),(voo(ij),ij=1,nij),(too(ij),ij=1,nij),&
          (dpx(ij),ij=1,nij),(dpy(ij),ij=1,nij),(dux(ij),ij=1,nij),&
          (duy(ij),ij=1,nij),(dvx(ij),ij=1,nij),(dvy(ij),ij=1,nij),&
          (dtx(ij),ij=1,nij),(dty(ij),ij=1,nij),(den(ij),ij=1,nij),&
-         (deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celprr(ij),ij=1,nij),&
+         (deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celcp(ij),ij=1,nij),(celkappa(ij),ij=1,nij),&
          (fdsu(ij),ij=1,nij),(fdsv(ij),ij=1,nij),(fdsub(ij),ij=1,nij),&
          (fdsvb(ij),ij=1,nij),(fdsuc(ij),ij=1,nij),(fdsvc(ij),ij=1,nij),&
          (fdst(ij),ij=1,nij),(fdstc(ij),ij=1,nij),(lamvisc(ij),ij=1,nij)

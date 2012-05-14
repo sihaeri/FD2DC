@@ -7,7 +7,7 @@ CONTAINS
 SUBROUTINE fd_tecwrite_eul(tec_unit,extra_Var)
 
 USE precision,      ONLY : r_single
-USE shared_data,    ONLY : title,nim,njm,xc,u,v,p,yc,li,t,x,y,den,celbeta,celprr,nij
+USE shared_data,    ONLY : title,nim,njm,xc,u,v,p,yc,li,t,x,y,den,celbeta,celcp,celkappa,nij
 USE parameters,     ONLY : max_len_tecline
 
 IMPLICIT NONE
@@ -21,15 +21,15 @@ WRITE(tec_unit,'(A)')'TITLE="'//TRIM(title)//'"'
 
 IF(PRESENT(extra_var))THEN
 
-  variableline = 'VARIABLES ="x", "y", "u", "v", "p" ,"t", "den", "beta", "prandtle", "extra"'
+  variableline = 'VARIABLES ="x", "y", "u", "v", "p" ,"t", "den", "beta", "cp", "kappa", "extra"'
   WRITE(tec_unit,*)TRIM(variableline)
-  WRITE(tec_unit,'(A,I5,A,I5)')'ZONE DATAPACKING=BLOCK, VARLOCATION = ([3,4,5,6,7,8,9,10]=CELLCENTERED), I=',nim, ',J=',njm
+  WRITE(tec_unit,'(A,I5,A,I5)')'ZONE DATAPACKING=BLOCK, VARLOCATION = ([3,4,5,6,7,8,9,10,11]=CELLCENTERED), I=',nim, ',J=',njm
 
 ELSE
 
-  variableline = 'VARIABLES ="x", "y", "u", "v", "p" ,"t", "den", "beta", "prandtle"'
+  variableline = 'VARIABLES ="x", "y", "u", "v", "p" ,"t", "den", "beta", "cp" , "kappa" '
   WRITE(tec_unit,*)TRIM(variableline)
-  WRITE(tec_unit,'(A,I5,A,I5)')'ZONE DATAPACKING=BLOCK, VARLOCATION = ([3,4,5,6,7,8,9]=CELLCENTERED), I=',nim, ',J=',njm
+  WRITE(tec_unit,'(A,I5,A,I5)')'ZONE DATAPACKING=BLOCK, VARLOCATION = ([3,4,5,6,7,8,9,10]=CELLCENTERED), I=',nim, ',J=',njm
 
 ENDIF
 DO j = 1,njm
@@ -89,7 +89,14 @@ ENDDO
 DO j = 2,njm
   DO i = 2,nim
     ij = li(i)+j
-    WRITE(tec_unit,*)celprr(ij)
+    WRITE(tec_unit,*)celcp(ij)
+  ENDDO
+ENDDO
+
+DO j = 2,njm
+  DO i = 2,nim
+    ij = li(i)+j
+    WRITE(tec_unit,*)celkappa(ij)
   ENDDO
 ENDDO
 

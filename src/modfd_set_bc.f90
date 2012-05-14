@@ -162,7 +162,7 @@ SUBROUTINE fd_bctemp
 !--treatment at symmetry planes is the same as for an adiabatic
 !--wall
 USE real_parameters,ONLY: half,zero
-USE shared_data,   ONLY : ni,nim,li,t,nj,njm,visc,prr,y,yc,r,ap,su,xc,x,f1,duct,ae,movingmesh
+USE shared_data,   ONLY : ni,nim,li,t,nj,njm,visc,celkappa,y,yc,r,ap,su,xc,x,f1,duct,ae,movingmesh
 USE precision,     ONLY : r_single
 
 IMPLICIT NONE
@@ -174,7 +174,7 @@ IF(movingmesh)THEN !--ISOTHERMAL WALL
   !--NORTH BOUNDARY (ISOTHERMAL WALL, NON-ZERO DIFFUSIVE FLUX)
   DO i=2,nim
     ij=li(i)+njm
-    d=visc*prr*(x(i)-x(i-1))*r(njm)/(yc(nj)-yc(njm))
+    d=celkappa(ij)*(x(i)-x(i-1))*r(njm)/(yc(nj)-yc(njm))
     ap(ij)=ap(ij)+d
     su(ij)=su(ij)+d*t(ij+1)
   ENDDO
@@ -182,7 +182,7 @@ IF(movingmesh)THEN !--ISOTHERMAL WALL
   !--SOUTH BOUNDARY (ISOTHERMAL WALL, NON-ZERO DIFFUSIVE FLUX)
   DO i=2,nim
     ij=li(i)+2
-    d=visc*prr*(x(i)-x(i-1))*r(1)/(yc(2)-yc(1))
+    d=celkappa(ij)*(x(i)-x(i-1))*r(1)/(yc(2)-yc(1))
     ap(ij)=ap(ij)+d
     su(ij)=su(ij)+d*t(ij-1)
   ENDDO
@@ -206,7 +206,7 @@ ENDIF
 IF(duct)THEN !--Inlet
   DO j=2,njm
     ij=li(2)+j
-    d=half*visc*prr*(y(j)-y(j-1))*(r(j)+r(j-1))/(xc(2)-xc(1))
+    d=half*celkappa(ij)*(y(j)-y(j-1))*(r(j)+r(j-1))/(xc(2)-xc(1))
     awc=d+f1(ij-nj)
     ap(ij)=ap(ij)+awc
     su(ij) =su(ij) +awc*t(ij-nj)
@@ -215,7 +215,7 @@ ELSE
   !--WEST BOUNDARY (ISOTHERMAL WALL, NON-ZERO DIFFUSIVE FLUX)
   DO j=2,njm
     ij=li(2)+j
-    d=half*visc*prr*(y(j)-y(j-1))*(r(j)+r(j-1))/(xc(2)-xc(1))
+    d=half*celkappa(ij)*(y(j)-y(j-1))*(r(j)+r(j-1))/(xc(2)-xc(1))
     ap(ij)=ap(ij)+d
     su(ij)=su(ij)+d*t(ij-nj)
   ENDDO
@@ -240,7 +240,7 @@ ELSE
     !--EAST BOUNDARY (ISOTHERMAL WALL)
     DO j=2,njm
       ij=li(nim)+j
-      d=half*visc*prr*(y(j)-y(j-1))*(r(j)+r(j-1))/(xc(ni)-xc(nim))
+      d=half*celkappa(ij)*(y(j)-y(j-1))*(r(j)+r(j-1))/(xc(ni)-xc(nim))
       ap(ij)=ap(ij)+d
       su(ij)=su(ij)+d*t(ij+nj)
     ENDDO

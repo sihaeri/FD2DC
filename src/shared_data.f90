@@ -67,9 +67,7 @@ REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: sor,resor,urf,gds
 
 !-- densit: fluid density
 !-- visc: fluid dynamic viscosity
-!-- prm: fluid prandtle number
-!-- cpm: mean heat capacity 
-!-- prr: 1/prm 
+!-- cpf: fluid mean heat capacity, kappaf: fluid thermal conductivity
 !-- tref: reference temperature
 !-- u: u-velocity field
 !-- v: v-velocity field
@@ -78,11 +76,11 @@ REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: sor,resor,urf,gds
 !-- dpx,dpy: cell centre gradient 
 !-- dux,duy,dvx,dvy: cell centre gradient 
 !-- th,tc: hot and cold wall temperature (th input temp for flow problem)
-!-- celbeta, celprr: cel prandtle and beta
+!-- celbeta, celcp, celkappa: cell values for beta cp and kappa
 !-- viscgamma: for temperature dependant viscosity, to be used in conjunction with temp_visc
-REAL(KIND = r_single) :: densit,visc,prm,prr,tref,th,tc,cpm,viscgamma
-REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: celbeta,celprr,den,deno,u,v,p,pp,t,f1,f2,dpx,&
-                                                  dpy,dux,duy,dvx,dvy,dtx,dty,lamvisc
+REAL(KIND = r_single) :: densit,visc,tref,th,tc,cpf,kappaf,viscgamma
+REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: celbeta,celcp,celkappa,den,deno,u,v,p,pp,t,f1,f2,dpx,&
+                                                  dpy,dux,duy,dvx,dvy,dtx,dty,lamvisc,ft1,ft2
 
 
 !-- 3.3 geometry
@@ -156,7 +154,8 @@ LOGICAL                       :: duct !--if true inlet outlet boundary
 !--forcedmotion:  set to TRUE if it is forced motion and change the forced_motion function for the type of motion
 !--dxmean:      mean dx of the domain calculated in fd_create_geom
 !--dxmeanmoved: mean motion of the particles in x-dir since the last mesh motion
-!--prandtlp:    set to cp_{p}mu_{f}/k_{p} THIS IS NOT really a PRANDTLE NUMBER
+!--prandtlp:    set to cp_{p}mu_{f}/k_{p} THIS IS NOT really a PRANDTLE NUMBER !--Not used anymore
+!--cpp:  mean heat capacity particle, kappap: particle conductivity 
 !--movingmesh:  does not work properly, for simulation of infinitly large duct
 !--isotherm:   set to false if particle has source term (variable temp), If true objqp should be set and objtp is the initial temp
 !--ibsu,ibsv: momentum sources similar to fdsu,fdsv
@@ -177,7 +176,7 @@ INTEGER,DIMENSION(:),ALLOCATABLE :: nsurfpoints,nobjcells,nnusseltpoints
 REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE   :: objqp,objtp,densitp,betap,objcentx,objcenty,objradius,objbradius,&
                                                     prandtlp,objcentu,objcentv,objcentom,objcentmi,objvol,&
                                                     objcentxo,objcentyo,objcentvo,objcentuo,objcentomo,&
-                                                    mcellpercv
+                                                    mcellpercv,cpp,kappap
 REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: objcento
 !--allocatable for 1..Max(nobjcells),1..nsphere
 REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: surfpointx,surfpointy,objcellx,objcelly,&

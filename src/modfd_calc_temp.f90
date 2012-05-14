@@ -5,7 +5,7 @@ PUBLIC :: fd_calc_temp
 CONTAINS
 !=====================================
 SUBROUTINE fd_calc_temp
-
+!--Best to solve enthalpy, this is not very stable, but for now ....
 USE parameters,         ONLY : out_unit,solver_sparsekit,solver_sip,solver_cg,solver_hypre
 USE real_parameters,    ONLY : one,zero,half
 USE precision,          ONLY : r_single
@@ -14,11 +14,11 @@ USE shared_data,        ONLY : urf,ien,t,to,too,su,nim,njm,&
                                xc,ni,nj,li,fx,y,r,visc,su,&
                                u,v,ae,aw,an,as,fy,yc,x,lcal,ien,&
                                deno,den,laxis,dtr,gamt,sor,resor,&
-                               nsw,f1,f2,dpx,dpy,ltime,ap,ltest,prr,gds,&
-                               putobj,fdst,dtx,dty,apt,&
+                               nsw,f1,f2,dpx,dpy,ltime,ap,ltest,celkappa,celcp,gds,&
+                               putobj,fdst,dtx,dty,apt,ft1,ft2,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
-                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celprr
+                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli
 USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual
 
 IMPLICIT NONE
@@ -51,15 +51,14 @@ DO i=2,nim-1
     s=(y(j)-y(j-1))*(r(j)+r(j-1))*half
 
     !--COEFFICIENT RESULTING FROM DIFFUSIVE FLUX
-    d=visc*(celprr(ije)*fxe+celprr(ij)*fxp)*s/dxpe
+    d=(celkappa(ije)*fxe+celkappa(ij)*fxp)*s/dxpe
 
     !--EXPLICIT CONVECTIVE FLUX FOR UDS AND CDS
-    
-    ce=MIN(f1(ij),zero)
-    cp=MAX(f1(ij),zero)
+    ce=MIN(ft1(ij),zero)
+    cp=MAX(ft1(ij),zero)
 
     fuds=cp*t(ij)+ce*t(ije)
-    fcds=f1(ij)*(t(ije)*fxe+t(ij)*fxp)
+    fcds=ft1(ij)*(t(ije)*fxe+t(ij)*fxp)
 
     !--COEFFICIENTS AE(P) AND AW(E) DUE TO UDS
 
@@ -90,15 +89,14 @@ DO j=2,njm-1
     s=(x(i)-x(i-1))*r(j)
     
     !--COEFFICIENT RESULTING FROM DIFFUSIVE FLUX (SAME FOR U AND V)
-    d=visc*(celprr(ijn)*fyn+celprr(ij)*fyp)*s/dypn
+    d=(celkappa(ijn)*fyn+celkappa(ij)*fyp)*s/dypn
 
     !--EXPLICIT CONVECTIVE FLUXES FOR UDS AND CDS
-
-    cn=MIN(f2(ij),zero)
-    cp=MAX(f2(ij),zero)
+    cn=MIN(ft2(ij),zero)
+    cp=MAX(ft2(ij),zero)
 
     fuds=cp*t(ij)+cn*t(ijn)
-    fcds=f2(ij)*(t(ijn)*fyn+t(ij)*fyp)
+    fcds=ft2(ij)*(t(ijn)*fyn+t(ij)*fyp)
 
     !--COEFFICIENTS AE(P) AND AW(E) DUE TO UDS
 
@@ -126,7 +124,7 @@ DO i=2,nim
     !--UNSTEADY TERM CONTRIBUTION TO AP AND SU
 
     IF(ltime) THEN
-      aptt=deno(ij)*vol*dtr
+      aptt=celcp(ij)*deno(ij)*vol*dtr
       su(ij)=su(ij)+(one+gamt)*aptt*to(ij)-half*gamt*aptt*too(ij)
       ap(ij)=ap(ij)+(one+half*gamt)*aptt
     ENDIF

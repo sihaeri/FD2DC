@@ -765,7 +765,7 @@ USE shared_data,    ONLY : fdsu,fdsv,objfx,objfy,objru,objrv,obju,objv,&
                            dt,li,objcellvol,nobjcells,u,v,densitp,nij,fd_urf,&
                            nim,njm,fx,fy,fdsub,fdsvb,nj,objtp,objt,objrt,objq,fdst,t,&
                            nsphere,fdsvc,fdsuc,fdstc,apu,apv,objapu,objapv,objapt,apt,&
-                           objpoint_interpx,objpoint_interpy,stationary,isotherm,objqp
+                           objpoint_interpx,objpoint_interpy,stationary,isotherm,objqp,cpp
 USE precision,      ONLY : r_single
 USE real_parameters,ONLY : zero,one
 IMPLICIT NONE
@@ -811,7 +811,7 @@ IF(isotherm)THEN
       objrt(n,nn) = objtp(nn)
       objfx(n,nn) = densitp(nn)/dt*(objru(n,nn) - obju(n,nn))
       objfy(n,nn) = densitp(nn)/dt*(objrv(n,nn) - objv(n,nn))
-      objq(n,nn) = densitp(nn)/dt*(objrt(n,nn) - objt(n,nn))
+      objq(n,nn) = cpp(nn)*densitp(nn)/dt*(objrt(n,nn) - objt(n,nn))
     ENDDO
   ENDDO
 ELSE 
@@ -986,7 +986,7 @@ SUBROUTINE fd_calc_physprops(outvolp)
 USE precision,          ONLY : r_single
 USE shared_data,        ONLY : nij,x,y,objpoint_cvx,objpoint_cvy,nsphere,nobjcells,objcellvol,den,deno,densit,&
                                xc,yc,objcellx,objcelly,li,nim,njm,densitp,objpoint_interpx,objpoint_interpy,&
-                               celbeta,beta,betap,prr,prandtlp,celprr,lcal,ien
+                               celbeta,beta,betap,celkappa,celcp,cpf,cpp,kappaf,kappap,lcal,ien
 USE real_parameters,    ONLY : zero,one
 IMPLICIT NONE
 
@@ -998,7 +998,8 @@ deno = den
 
 den = densit
 
-celprr = prr
+celcp = cpf
+celkappa = kappaf
 celbeta = beta
 
 DO nn = 1,nsphere
@@ -1032,7 +1033,8 @@ DO nn = 1,nsphere
         IF(volp(ij) /= zero)THEN
           den(ij) = (one - volp(ij))*densit + volp(ij)*densitp(nn)
           celbeta(ij) = (one - volp(ij))*beta + volp(ij)*betap(nn)
-          celprr(ij) = (one - volp(ij))*prr + volp(ij)*one/prandtlp(nn)
+          celcp(ij) = (one - volp(ij))*cpf + volp(ij)*cpp(nn)
+          celkappa(ij) = (one - volp(ij))*kappaf + volp(ij)*kappap(nn)
         ENDIF
       ENDDO
     ENDDO
@@ -1099,7 +1101,7 @@ USE shared_data,      ONLY : dxmeanmoved,dxmeanmovedtot,dxmean,u,v,p,t,&
                               surfpointx,objcentx,objcentxo,objcellvertx,&
                               objpoint_cvx,objpoint_cvy,ni,nj,lcal,iu,ip,ien,&
                               li,f1,f2,nsphere,objcellx,objcelly,nobjcells,&
-                              objpoint_interpx,objpoint_interpy,nij,celbeta,celprr,&
+                              objpoint_interpx,objpoint_interpy,nij,celbeta,celcp,celkappa,&
                               den,deno
 USE real_parameters,  ONLY : zero,three,two,half,one
 USE modfd_set_bc,     ONLY : fd_bcout
@@ -1185,12 +1187,19 @@ IF(ABS(dxmeanmoved) > dxmean)THEN
     ENDDO
   ENDDO
   var = celbeta
-  varo = celprr
+  varo = celcp
   DO i = 3,ni !--Assume second line remains the same?
     DO j = 1,nj
       ij = li(i) + j
       celbeta(ij) = var(ij - nj)
-      celprr(ij) = varo(ij - nj) 
+      celcp(ij) = varo(ij - nj) 
+    ENDDO
+  ENDDO
+  varo = celkappa
+  DO i = 3,ni !--Assume second line remains the same?
+    DO j = 1,nj
+      ij = li(i) + j
+      celkappa(ij) = varo(ij - nj) 
     ENDDO
   ENDDO
   DO nn = 1,nsphere
