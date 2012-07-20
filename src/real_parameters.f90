@@ -88,6 +88,8 @@ REAL(KIND=r_single), PARAMETER :: svntytwosqrtthree = svntytwo * sqrtthree !--No
                                                                            !--tetrahedron quality
 REAL(KIND=r_single), PARAMETER :: foursqrtthree = four * sqrtthree         !--Normalization constant for
                                                                            !--triangle quality
+REAL(KIND=r_single), PARAMETER :: epsilonP = two*real_1e6
+REAL(KIND=r_single), PARAMETER :: distfactor = three
 !
 ! use for setting mass flux on aentwsb (update_iflux) and switching signs on fluxes in update_<<boundary>> subroutines
 

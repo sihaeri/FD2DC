@@ -2,7 +2,7 @@ MODULE modfd_create_geom
 
 PRIVATE
 PUBLIC :: fd_create_geom,fd_calc_sources,fd_calc_delta,find_single_point,fd_calc_mi,fd_calc_ori,fd_copy_oldvel,fd_calc_pos,&
-          fd_calc_physprops,fd_move_mesh,fd_calc_geom_volf,fd_calc_quality,fd_calculate_stats
+          fd_calc_physprops,fd_move_mesh,fd_calc_geom_volf,fd_calc_quality,fd_calculate_stats,fd_calc_part_collision
 CONTAINS
 !===========================================
 SUBROUTINE fd_create_geom
@@ -17,9 +17,9 @@ USE shared_data,        ONLY : objcentx,objcenty,objradius,objbradius,nsurfpoint
                                nusseltpointx,nusseltpointy,calclocalnusselt,nnusseltpoints,&
                                nusseltcentx,nusseltcenty,nusseltds,nusseltnx,nusseltny,nusseltpoint_interp,&
                                nusseltinterpx,nusseltinterpy,nusseltpoint_cvx,nusseltpoint_cvy,objvol,&
-                               objcellvertx,objcellverty,objpoint_interpx,objpoint_interpy,problem_name,&
-                               problem_len,read_fd_geom,dxmean,hypre_A,Hypre_b,Hypre_x,mpi_comm ,nij,dxmeanmoved,&
-                               dxmeanmovedtot,objcentxinit,objcentyinit,objcellxinit,&
+                               objcellvertx,objcellverty,objpoint_interpx,objpoint_interpy,objcell_overlap,&
+                               problem_name,problem_len,read_fd_geom,dxmean,hypre_A,Hypre_b,Hypre_x,mpi_comm ,nij,&
+                               dxmeanmovedtot,objcentxinit,objcentyinit,objcellxinit,dxmeanmoved,&
                                objcellyinit,objcellvertxinit,objcellvertyinit,forcedmotion
 USE precision,          ONLY : r_single
 USE parameters,         ONLY : plt_unit
@@ -418,8 +418,9 @@ IF(.NOT. read_fd_geom)THEN
   ALLOCATE(objcellx(maxnobjcell,nsphere),objcelly(maxnobjcell,nsphere),&
            objcellvol(maxnobjcell,nsphere),objpoint_cvx(maxnobjcell,nsphere),&
            objpoint_cvy(maxnobjcell,nsphere),objcellvertx(4,maxnobjcell,nsphere),objcellverty(4,maxnobjcell,nsphere),&
-           objpoint_interpx(2,maxnobjcell,nsphere),objpoint_interpy(2,maxnobjcell,nsphere))
-
+           objpoint_interpx(2,maxnobjcell,nsphere),objpoint_interpy(2,maxnobjcell,nsphere),&
+           objcell_overlap(maxnobjcell,nsphere))
+  objcell_overlap = 0
   DO n = 1,nsphere
    
     objcellx(1:nobjcells(n),n) = dummyobjcellx(1:nobjcells(n),n)
@@ -760,9 +761,9 @@ SUBROUTINE fd_calc_sources(predict_or_correct,resor,iter)
 
 USE parameters,     ONLY : force_predict,force_correct
 USE shared_data,    ONLY : fdsu,fdsv,objfx,objfy,objru,objrv,obju,objv,&
-                           objpoint_cvx, objpoint_cvy,x,y,objcellx,objcelly,&
+                           objpoint_cvx, objpoint_cvy,x,y,objcellx,objcelly,objcell_overlap,&
                            xc,yc,objcentu,objcentv,objcentom,objcentx,objcenty,&
-                           dt,li,objcellvol,nobjcells,u,v,densitp,nij,fd_urf,&
+                           dt,li,objcellvol,nobjcells,u,v,densitp,nij,fd_urf,objvol,&
                            nim,njm,fx,fy,fdsub,fdsvb,nj,objtp,objt,objrt,objq,fdst,t,&
                            nsphere,fdsvc,fdsuc,fdstc,apu,apv,objapu,objapv,objapt,apt,&
                            objpoint_interpx,objpoint_interpy,stationary,isotherm,objqp,cpp
@@ -814,7 +815,8 @@ IF(isotherm)THEN
       objq(n,nn) = cpp(nn)*densitp(nn)/dt*(objrt(n,nn) - objt(n,nn))
     ENDDO
   ENDDO
-ELSE 
+ELSE
+  objtp = zero
   DO nn = 1,nsphere
     DO n = 1,nobjcells(nn)
       objru(n,nn) = objcentu(nn) - objcentom(nn)*(objcelly(n,nn) - objcenty(nn))
@@ -822,21 +824,25 @@ ELSE
       objfx(n,nn) = densitp(nn)/dt*(objru(n,nn) - obju(n,nn))
       objfy(n,nn) = densitp(nn)/dt*(objrv(n,nn) - objv(n,nn))
       objq(n,nn) = objqp(nn)
+      objtp(nn) = objtp(nn) + objt(n,nn)*objcellvol(n,nn)
     ENDDO
+    objtp(nn) = objtp(nn)/objvol(nn)
   ENDDO
 ENDIF  
 DO nn = 1,nsphere
   DO n = 1,nobjcells(nn)
-    DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
-      dx = x(i) - x(i-1)
-      DO j =objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
-        dy = y(j) - y(j-1)
-        del = fd_calc_delta(xc(i),yc(j),objcellx(n,nn),objcelly(n,nn),dx, dy)*objcellvol(n,nn)
-        fdsuc(li(i)+j) = fdsuc(li(i)+j) + objfx(n,nn)*del*dx*dy
-        fdsvc(li(i)+j) = fdsvc(li(i)+j) + objfy(n,nn)*del*dx*dy
-        fdstc(li(i)+j) = fdstc(li(i)+j) + objq(n,nn)*del*dx*dy
+    !IF(objcell_overlap(n,nn) == 0)THEN
+      DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
+        dx = x(i) - x(i-1)
+        DO j =objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
+          dy = y(j) - y(j-1)
+          del = fd_calc_delta(xc(i),yc(j),objcellx(n,nn),objcelly(n,nn),dx, dy)*objcellvol(n,nn)
+          fdsuc(li(i)+j) = fdsuc(li(i)+j) + objfx(n,nn)*del*dx*dy
+          fdsvc(li(i)+j) = fdsvc(li(i)+j) + objfy(n,nn)*del*dx*dy
+          fdstc(li(i)+j) = fdstc(li(i)+j) + objq(n,nn)*del*dx*dy
+        ENDDO
       ENDDO
-    ENDDO
+    !ENDIF
   ENDDO
 ENDDO 
 
@@ -948,7 +954,7 @@ SUBROUTINE fd_calc_rigidvel
 
 USE shared_data,        ONLY : objcentu,objcentv,objcentom,nobjcells,objcellx,objcelly,&
                                objcentx,objcenty,objcellvol,obju,objv,nsphere,densitp,objvol,&
-                               objcentmi,up,vp,omp,stationary,forcedmotion
+                               objcentmi,up,vp,omp,stationary,forcedmotion,dt,Fpq !,Fpw
 USE precision,          ONLY : r_single
 USe real_parameters,    ONLY : zero
 IMPLICIT NONE
@@ -968,13 +974,13 @@ ELSE
     DO n= 1,nobjcells(nn)
       rxmc = objcellx(n,nn) - objcentx(nn) 
       rymc = objcelly(n,nn) - objcenty(nn)
-      objcentu(nn) = objcentu(nn) + objcellvol(n,nn) * densitp(nn) * obju(n,nn)
-      objcentv(nn) = objcentv(nn) + objcellvol(n,nn) * densitp(nn) * objv(n,nn)
+      objcentu(nn) = objcentu(nn) + objcellvol(n,nn) * (densitp(nn) * obju(n,nn) )
+      objcentv(nn) = objcentv(nn) + objcellvol(n,nn) * (densitp(nn) * objv(n,nn) )
       objcentom(nn) = objcentom(nn) + objcellvol(n,nn) * densitp(nn) * (rxmc*objv(n,nn) - rymc*obju(n,nn))                                            
     ENDDO
     !--Convert Momentum to velocity
-    objcentu(nn) = objcentu(nn) / (objvol(nn) * densitp(nn))
-    objcentv(nn) = objcentv(nn) / (objvol(nn) * densitp(nn))
+    objcentu(nn) = objcentu(nn) / (objvol(nn) * densitp(nn)) + Fpq(1,nn)*dt
+    objcentv(nn) = objcentv(nn) / (objvol(nn) * densitp(nn)) + Fpq(2,nn)*dt
     objcentom(nn) = objcentom(nn) / objcentmi(nn)
   ENDDO
 ENDIF
@@ -1078,16 +1084,17 @@ USE real_parameters,  ONLY : zero
 IMPLICIT NONE
 !-------------------------Locals
 INTEGER :: nn
-REAL(KIND = r_single) :: alpha,c,s
+REAL(KIND = r_single) :: alpha,c,s,sigma
 
 DO nn = 1,nsphere
   !--angular velocity vector is (0,0,omega)
   alpha = ABS(objcentom(nn))*dt
+  sigma = objcentom(nn)/ABS(objcentom(nn)) 
   c     = COS(alpha)
   s     = SIN(alpha)
   objcento(1,nn) = c
-  objcento(2,nn) = -s
-  objcento(3,nn) = s
+  objcento(2,nn) = -sigma*s
+  objcento(3,nn) = sigma*s
   objcento(4,nn) = c
 ENDDO
 
@@ -1238,21 +1245,30 @@ END SUBROUTINE fd_move_mesh
 
 SUBROUTINE fd_calc_pos(itr)
 
+USE parameters,       ONLY : subTimeStep
 USE precision,        ONLY : r_single
 USE shared_data,      ONLY : nsphere,nobjcells,objcentmi,objcentxo,objcentyo,objcellx,objcelly,&
                              objcentxo,objcentyo,dt,objcentu,objcentv,objcento,objpoint_interpx,objpoint_interpy,&
                              objcellvertx,objcellverty,objcentx,objcenty,objcentuo,objcentvo,&
                              objpoint_cvx,objpoint_cvy,nsurfpoints,surfpointx,surfpointy,dxmeanmoved,up,vp,omp,&
-                             forcedmotion,lread
-USE real_parameters,  ONLY : zero,three,two,half,one
+                             forcedmotion,lread,Fpq,Fpw,objvol,densitp,x,y,xc,yc,objcellvol,li,fdfcu,fdfcv
+USE real_parameters,  ONLY : zero,three,two,half,one,four
 
 IMPLICIT NONE
 
 INTEGER,INTENT(IN)    :: itr
 
-INTEGER               :: n,nn,ip,jp,error,moved
-REAL(KIND = r_single) :: lindispx,lindispy,rmcx,rmcy,rmcyr(4),rmcxr(4),dxmoved(nsphere)
+INTEGER               :: n,nn,ip,jp,error,moved,k,i,j
+REAL(KIND = r_single) :: lindispx,lindispy,rmcx,rmcy,rmcyr(4),rmcxr(4),dxmoved(nsphere),&
+                          dtk,del,dx,dy,Fx,Fy
+REAL(KIND = r_single),ALLOCATABLE,SAVE      :: tempFpq(:,:),tempFpw(:,:) 
 REAL(KIND = r_single),PARAMETER :: rone(4) = (/one,one,one,one/)
+
+IF(itr == 1)THEN
+  ALLOCATE(tempFpq(2,nsphere),tempFpw(2,nsphere))
+  tempFpq = zero 
+  tempFpw = zero
+ENDIF
 
 IF(forcedmotion)THEN
   DO nn = 1,nsphere
@@ -1274,22 +1290,69 @@ IF(forcedmotion)THEN
     ENDDO
   ENDDO
 ELSE
+  !moved = 0
+  objcentxo(1:nsphere) = objcentx(1:nsphere)
+  objcentyo(1:nsphere) = objcenty(1:nsphere)
+  dtk = dt/REAL(subTimeStep,r_single)
+  Fdfcu = zero
+  Fdfcv = zero
+  Fpq(1:2,1:nsphere) = tempFpq(1:2,1:nsphere) 
+  Fpw(1:2,1:nsphere) = tempFpw(1:2,1:nsphere)  
+  
+  DO k = 1,subTimeStep
+
+    tempFpq(1:2,1:nsphere) = Fpq(1:2,1:nsphere)
+    tempFpw(1:2,1:nsphere) = Fpw(1:2,1:nsphere)
+
+    DO nn = 1,nsphere    
+         
+      IF(itr == 1 .AND. .NOT. lread)THEN
+        lindispx = objcentu(nn) * dtk
+        lindispy = objcentv(nn) * dtk
+      ELSE
+        lindispx = (three/two*objcentu(nn) - half*objcentuo(nn)) * dtk
+        lindispy = (three/two*objcentv(nn) - half*objcentvo(nn)) * dtk
+      ENDIF
+
+      objcentx(nn) = objcentx(nn) + lindispx
+      objcenty(nn) = objcenty(nn) + lindispy
+
+    ENDDO
+
+    CALL fd_calc_part_collision
+
+    DO nn = 1,nsphere
+      lindispx = one/objvol(nn)/densitp(nn)/four*( tempFpq(1,nn)+Fpq(1,nn)+tempFpw(1,nn)+Fpw(1,nn) )*dtk**2
+      lindispy = one/objvol(nn)/densitp(nn)/four*( tempFpq(2,nn)+Fpq(2,nn)+tempFpw(2,nn)+Fpw(2,nn) )*dtk**2
+
+      objcentx(nn) = objcentx(nn) + lindispx
+      objcenty(nn) = objcenty(nn) + lindispy
+
+    ENDDO  
+  
+  ENDDO
+
+  !--Done to reuse Fpq
+  tempFpq(1:2,1:nsphere) = Fpq(1:2,1:nsphere)
+  tempFpw(1:2,1:nsphere) = Fpw(1:2,1:nsphere)
+
   DO nn = 1,nsphere
+    
     moved = 0
-    !--Move the particle 
-    objcentxo(nn) = objcentx(nn)
-    objcentyo(nn) = objcenty(nn)
+    
+    lindispx = objcentx(nn) - objcentxo(nn)
+    lindispy = objcenty(nn) - objcentyo(nn) 
+    
     IF(itr == 1 .AND. .NOT. lread)THEN
-      lindispx = objcentu(nn) * dt
-      lindispy = objcentv(nn) * dt
+      !--Only add the part from collision
+      Fpq(1,nn) = two/dt**2*(lindispx - objcentu(nn) * dt) 
+      Fpq(2,nn) = two/dt**2*(lindispy - objcentv(nn) * dt) 
     ELSE
-      lindispx = (three/two*objcentu(nn) - half*objcentuo(nn)) * dt
-      lindispy = (three/two*objcentv(nn) - half*objcentvo(nn)) * dt
+      Fpq(1,nn) = two/dt**2*(lindispx - (three/two*objcentu(nn) - half*objcentuo(nn)) * dt) 
+      Fpq(2,nn) = two/dt**2*(lindispy - (three/two*objcentv(nn) - half*objcentvo(nn)) * dt) 
     ENDIF
 
-    objcentx(nn) = objcentx(nn) + lindispx
-    objcenty(nn) = objcenty(nn) + lindispy
-                                                 
+                             
     !--Update the material points
     !--orientation updated in a seperate subroutine
     DO n = 1,nobjcells(nn)
@@ -1331,8 +1394,23 @@ ELSE
 
     WRITE(*,*)moved, ' Particles moved in this time step for sphere, ', nn
 
+    !--Spread Fx and Fy
+!    DO n = 1,nobjcells(nn)
+!      DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
+!        dx = x(i) - x(i-1)
+!        DO j =objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
+!          dy = y(j) - y(j-1)
+!          del = fd_calc_delta(xc(i),yc(j),objcellx(n,nn),objcelly(n,nn),dx, dy)*objcellvol(n,nn)
+!          FdFcu(li(i)+j) = FdFcu(li(i)+j) + Fx*del*dx*dy
+!          FdFcv(li(i)+j) = FdFcv(li(i)+j) + Fy*del*dx*dy
+!        ENDDO
+!      ENDDO
+!    ENDDO
+
   ENDDO
 ENDIF
+
+!CALL fd_find_overlap
 
 dxmoved = objcentx - objcentxo
 
@@ -1362,7 +1440,7 @@ SUBROUTINE fd_geom_reader(ierror)
 
 USE shared_data,        ONLY : objcellx,objcelly,objcellvol,objpoint_cvx,objpoint_cvy,objcellvertx,objcellverty,&
                                objpoint_interpx,objpoint_interpy,problem_name,problem_len,nsphere,objcentx,objcenty,&
-                               nobjcells,objvol,objradius
+                               nobjcells,objvol,objradius,objcell_overlap
 USE mod_create_filenum, ONLY : create_filenum
 USE real_parameters,    ONLY : third,quarter,half,pi
 USE precision,          ONLY : r_single
@@ -1398,8 +1476,8 @@ IMPLICIT NONE
     ALLOCATE(objcellx(MaxNelem,nsphere),objcelly(MaxNelem,nsphere),&
            objcellvol(MaxNelem,nsphere),objpoint_cvx(MaxNelem,nsphere),&
            objpoint_cvy(MaxNelem,nsphere),objcellvertx(4,MaxNelem,nsphere),objcellverty(4,MaxNelem,nsphere),&
-           objpoint_interpx(2,MaxNelem,nsphere),objpoint_interpy(2,MaxNelem,nsphere)) 
-    
+           objpoint_interpx(2,MaxNelem,nsphere),objpoint_interpy(2,MaxNelem,nsphere),objcell_overlap(MaxNelem,nsphere)) 
+    objcell_overlap = 0
     DO n = 1,nsphere
       OPEN(UNIT = 1, FILE = problem_name(1:problem_len)//'_'//filenum(n+1)//'.neu', STATUS = 'OLD',IOSTAT=ierror)
       READ(1,101),GeomName
@@ -2139,5 +2217,111 @@ ry = (y - objy)/hy
 fd_calc_delta2 = deltaX/hx*deltaY/hy
 
 END FUNCTION fd_calc_delta2
+
+SUBROUTINE fd_calc_part_collision
+
+!--A naive collision strategy, Only for O(100) spherical particles  
+
+USE shared_data,      ONLY : nsphere,objcentx,objcenty,Fpq,Fpw,gravx,gravy,x,y,objradius
+USE real_parameters,  ONLY : zero,two
+USE precision,        ONLY : r_single
+
+IMPLICIT NONE
+
+INTEGER :: q,p,w
+REAL(KIND = r_single) :: minx,maxx,miny,maxy,g
+
+Fpq = zero;
+Fpw = zero;
+
+g = SQRT(gravx**2+gravy**2)
+
+!--Particle-particle collision
+DO p = 1,nsphere
+  DO q = 1,nsphere
+    IF(p /= q)THEN
+      Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q),p,q)
+    ENDIF
+  ENDDO
+ENDDO
+
+minx = MINVAL(x,1)
+maxx = MAXVAL(x,1)
+miny = MINVAL(y,1)
+maxy = MAXVAL(y,1)
+
+!--Particle-wall collision, (Mirror image)
+DO p = 1,nsphere 
+  !--e wall
+  Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p)
+  !--w wall
+  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p)
+  !--n wall
+  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p)
+  !--s wall
+  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p)
+ENDDO
+
+END SUBROUTINE fd_calc_part_collision
+
+FUNCTION fd_calc_binary_colforce(xp,yp,xq,yq,p,q)
+
+!--Suggested by Glowinsky 1995, Only forces in normal direction and soft (plastic) collisions 
+
+USE shared_data,    ONLY : dxmean,densitp,objvol,objradius
+USE precision,      ONLY : r_single
+USE real_parameters,ONLY : distfactor,zero,half,epsilonP,one
+
+IMPLICIT NONE 
+
+REAL(KIND = r_single) :: fd_calc_binary_colforce(2)
+REAL(KIND = r_single),INTENT(IN)  :: xp,yp,xq,yq
+INTEGER              ,INTENT(IN)  :: p,q
+REAL(KIND = r_single)             :: pq(2),dpq !-unit vect and distance between two centres
+
+dpq = SQRT( (xp - xq)**2 + (yp - yq)**2 )
+pq =  (/(xp - xq),(yp - yq)/)
+!epq = pq/dpq
+
+!fd_calc_binary_colforce = (densitp(p)*objvol(p) + densitp(q)*objvol(q))/two/(dxmean)**2*&
+!                          (MAX(zero,-(dpq - objradius(p) - objradius(q) - const*dxmean)/(const*dxmean)))**2*epq
+
+fd_calc_binary_colforce = epsilonP*pq*(MAX(zero,-(dpq - objradius(p) - objradius(q) - distfactor*dxmean)))**2
+
+END FUNCTION fd_calc_binary_colforce
+
+SUBROUTINE fd_find_overlap
+
+USE precision,      ONLY : r_single
+USE real_parameters,ONLY : distfactor,one
+USE shared_data,    ONLY : nobjcells,objpoint_cvx,objpoint_cvy,&
+                           nsphere,objcell_overlap,deltalen,dxmean,objcellx,objcelly
+
+IMPLICIT NONE
+
+INTEGER              :: nn,n,mm,m
+REAL(KIND = r_single):: dist
+
+objcell_overlap = 0
+
+DO nn = 1,nsphere
+  DO n = 1,nobjcells(nn)
+    IF(objcell_overlap(n,nn) /= 0)CYCLE
+    DO mm = nn+1,nsphere
+      DO m = 1,nobjcells(mm)
+        IF(objcell_overlap(m,mm) /= 0)CYCLE
+        dist = SQRT( (objcellx(m,mm) - objcellx(n,nn))**2 + (objcelly(m,mm) - objcelly(n,nn))**2 )
+        IF(dist < (distfactor+one)*dxmean)objcell_overlap(m,mm) = nn
+      ENDDO
+    ENDDO
+  
+  ENDDO
+ENDDO
+
+DO mm = 1,nsphere
+  WRITE(*,*)COUNT(objcell_overlap(:,mm) /= 0),', Lagrangian Cells are optet-out for sphere: ',mm
+ENDDO
+
+END SUBROUTINE fd_find_overlap
 
 ENDMODULE modfd_create_geom

@@ -33,4 +33,6 @@ INTEGER,PARAMETER       :: maxmove = 2
 INTEGER,PARAMETER       :: do_collect_stat = 1
 INTEGER,PARAMETER       :: end_collect_stat = do_collect_stat + 1
 
+INTEGER,PARAMETER       :: subTimeStep = 5
+
 END MODULE parameters

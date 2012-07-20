@@ -8,13 +8,13 @@ USE modfd_problem_setup, ONLY : fd_problem_setup,fd_problem_restart,fd_copy_time
 USE shared_data,         ONLY : lread,itim,itst,louts,lcal,iu,iv,ip,ien,u,p,v,t,ltime,time,minit,&
                                 maxit,u,v,p,t,resor,nprt, filenum,problem_name,problem_len,&
                                 imon,jmon,slarge,sormax,ni,nj,loute,lwrite,nim,njm,nij,&
-                                x,y,xc,yc,li,f1,f2,vo,uo,to,putobj,dt,duct,filnprt,&
+                                x,y,xc,yc,li,f1,f2,vo,uo,to,putobj,dt,duct,filnprt,spherenum,isotherm,objtp,&
                                 nfil,nfilpoints,filpointx,filpointy,filru,filrv,calcsurfforce,&
                                 localnusselt,calclocalnusselt,nusseltcentx,nusseltcenty,nnusseltpoints,&
                                 nsphere,nfil,filfirstposy,sphnprt,surfpointx,surfpointy,objcellx,objcelly,&
                                 nobjcells,nsurfpoints,objcellvertx,objcellverty,objcentu,objcentv,objcentx,&
                                 objcenty,stationary,th,movingmesh,dxmeanmoved,dxmean,dxmeanmovedtot,&
-                                lamvisc,temp_visc,tc,ulid,objradius,naverage_steps,calclocalnusselt_ave
+                                lamvisc,temp_visc,tc,ulid,objradius,naverage_steps,calclocalnusselt_ave,objcentom
 USE parameters,          ONLY : out_unit,eres_unit,plt_unit,force_predict,force_correct,do_collect_stat,end_collect_stat
 USE modfd_set_bc,        ONLY : fd_bctime,fd_bcout
 USE modfd_calc_pre,      ONLY : fd_calc_pre
@@ -25,7 +25,7 @@ USE modfd_calc_integrals,ONLY : fd_calc_integrals,fd_calc_surf_force,fd_calc_sur
                                 fd_calc_lwall_nusselt,fd_calc_surf_nusselt_ave
 USE modfd_tecwrite,      ONLY : fd_tecwrite_eul,fd_tecwrite_fil,fd_tecwrite_sph_v,fd_tecwrite_sph_s
 USE modfd_create_geom,   ONLY : fd_calc_sources,fd_calc_mi,fd_calc_ori,fd_calc_pos,fd_calc_physprops,fd_copy_oldvel,&
-                                fd_move_mesh,fd_calculate_stats
+                                fd_move_mesh,fd_calculate_stats,fd_calc_part_collision
 USE modfil_create_geom,  ONLY : fil_sol_tension,fil_sol_positions,fil_calc_sources
 use omp_lib
 IMPLICIT NONE
@@ -67,8 +67,9 @@ IF(ltime .AND. lwrite)THEN
   ELSE
     maxfl = itime/nprt
   ENDIF
-  ALLOCATE(filenum(maxfl))
+  ALLOCATE(filenum(maxfl),spherenum(nsphere))
   CALL create_filenum(maxfl,filenum)
+  CALL create_filenum(nsphere,spherenum)
 ENDIF
 npoint = 0 !--for time steps used in time averaging 
 DO itim = itims,itime
@@ -136,11 +137,18 @@ DO itim = itims,itime
   IF(nsphere > 0)THEN
    !CALL fd_calc_surf_force(densref,0.1,1.0)
    IF(.NOT. stationary)THEN
-     OPEN(1234,FILE='vel.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-     OPEN(1235,FILE='pos.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-     WRITE(1234,*)objcentu(1),objcentv(1) !
-     WRITE(1235,*)objcentx(1)-dxmeanmovedtot,objcenty(1)
-     CLOSE(1234);CLOSE(1235)
+     DO nn = 1,nsphere
+       OPEN(1234,FILE='vel_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+       OPEN(1235,FILE='pos_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+       IF(.NOT. isotherm)THEN
+         OPEN(1236,FILE='temp_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+         WRITE(1236,*)objtp(nn)
+         CLOSE(1236)
+       ENDIF
+       WRITE(1234,*)objcentom(nn),objcentu(nn),objcentv(nn) !
+       WRITE(1235,*)objcentx(nn)-dxmeanmovedtot,objcenty(nn)
+       CLOSE(1234);CLOSE(1235)
+     ENDDO
      CALL fd_calc_mi
      CALL fd_calc_ori
      CALL fd_calc_pos(itim-itims+1)
@@ -174,16 +182,17 @@ DO itim = itims,itime
         CALL fd_tecwrite_eul(plt_unit)
       ENDIF
       CLOSE(plt_unit)
+      IF(calclocalnusselt .AND. .NOT. duct)THEN
+        OPEN(UNIT = plt_unit,FILE='wallnusselt'//filenum(n)//'.dat',STATUS='NEW')
+        ALLOCATE(wallocnusselt(nj))
+        CALL fd_calc_lwall_nusselt(wallocnusselt,th,tc)
+        DO nn=2,njm
+          WRITE(plt_unit,'(2(E12.5,1X))') yc(nn),wallocnusselt(nn)
+        ENDDO
+        CLOSE(plt_unit)
 
-      OPEN(UNIT = plt_unit,FILE='wallnusselt'//filenum(n)//'.dat',STATUS='NEW')
-      ALLOCATE(wallocnusselt(nj))
-      CALL fd_calc_lwall_nusselt(wallocnusselt,th,tc)
-      DO nn=2,njm
-        WRITE(plt_unit,'(2(E12.5,1X))') yc(nn),wallocnusselt(nn)
-      ENDDO
-      CLOSE(plt_unit)
-
-      DEALLOCATE(wallocnusselt)
+        DEALLOCATE(wallocnusselt)
+      ENDIF
 
     ELSEIF(lwrite .AND. .NOT. ltime)THEN
      

@@ -109,6 +109,9 @@ REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE ::uo,vo,to,uoo,voo,too
 !-- filenum: keeps the time step index on the end of the ascii files. 00000, 00001, 00002 etc
 CHARACTER(LEN=5),SAVE, ALLOCATABLE     :: filenum(:)
 
+!-- spherenum: keeps the sphere index on the end of the ascii files. 00000, 00001, 00002 etc
+CHARACTER(LEN=5),SAVE, ALLOCATABLE     :: spherenum(:)
+
 !--working arrays
 REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: ae,aw,an,as,ap,su,sv,apu,apv,apt
 
@@ -154,7 +157,6 @@ LOGICAL                       :: duct !--if true inlet outlet boundary
 !--forcedmotion:  set to TRUE if it is forced motion and change the forced_motion function for the type of motion
 !--dxmean:      mean dx of the domain calculated in fd_create_geom
 !--dxmeanmoved: mean motion of the particles in x-dir since the last mesh motion
-!--prandtlp:    set to cp_{p}mu_{f}/k_{p} THIS IS NOT really a PRANDTLE NUMBER !--Not used anymore
 !--cpp:  mean heat capacity particle, kappap: particle conductivity 
 !--movingmesh:  does not work properly, for simulation of infinitly large duct
 !--isotherm:   set to false if particle has source term (variable temp), If true objqp should be set and objtp is the initial temp
@@ -174,7 +176,7 @@ REAL(KIND = r_single),ALLOCATABLE,DIMENSION(:,:,:) :: objcellvertxinit,objcellve
 !--allocatable for 1..nsphere
 INTEGER,DIMENSION(:),ALLOCATABLE :: nsurfpoints,nobjcells,nnusseltpoints
 REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE   :: objqp,objtp,densitp,betap,objcentx,objcenty,objradius,objbradius,&
-                                                    prandtlp,objcentu,objcentv,objcentom,objcentmi,objvol,&
+                                                    objcentu,objcentv,objcentom,objcentmi,objvol,&
                                                     objcentxo,objcentyo,objcentvo,objcentuo,objcentomo,&
                                                     mcellpercv,cpp,kappap
 REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: objcento
@@ -184,6 +186,12 @@ REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: surfpointx,surfpointy,objcel
                                                     objfx,objfy,objru,objrv,objt,objrt,objq,&
                                                     objapu,objapv,objapt,nusseltpointx,nusseltpointy,&
                                                     localnusselt
+INTEGER,DIMENSION(:,:),ALLOCATABLE               :: objcell_overlap
+!--Particle Collision forces, 
+!--Fpq, sum of forces on particle p due to all other particles q /= p, 
+!--Fpw, sum of forces on particle p due to all walls  
+REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: Fpq,Fpw
+
 REAL(KIND = r_single),DIMENSION(:,:,:),ALLOCATABLE :: objcellvertx,objcellverty,t_locnusselt
 INTEGER,DIMENSION(:,:),ALLOCATABLE               :: objpoint_cvx,objpoint_cvy
 INTEGER,DIMENSION(:,:,:),ALLOCATABLE             :: objpoint_interpx,objpoint_interpy
@@ -211,7 +219,8 @@ INTEGER,DIMENSION(:,:,:),ALLOCATABLE             :: filpoint_interpx,filpoint_in
 
 !==allocatable for 1..ncv (Eulerian) (no everlaps between objects), used both for VB and FD
 !--these are body forces, s means source, then variable, b is averaged c is correction
-REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: fdsu,fdsv,fdsuc,fdsvc,fdsub,fdsvb,fdst,fdstc
+!-fdFc collision force
+REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: fdsu,fdsv,fdsuc,fdsvc,fdsub,fdsvb,fdst,fdstc,FdFcu,FdFcv
 
 !--Surface property calculation arrays (1..Max(nsurfpoint),1..nsphere
 REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE   :: surfds,surfnx,surfny,surfcentrex,surfcentrey,nusseltds,nusseltnx,nusseltny,&

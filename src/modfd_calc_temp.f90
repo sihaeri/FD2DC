@@ -18,7 +18,7 @@ USE shared_data,        ONLY : urf,ien,t,to,too,su,nim,njm,&
                                putobj,fdst,dtx,dty,apt,ft1,ft2,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
-                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli
+                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,dux,dvy,p
 USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual
 
 IMPLICIT NONE
@@ -122,7 +122,6 @@ DO i=2,nim
     vol=dx*dy*rp
 
     !--UNSTEADY TERM CONTRIBUTION TO AP AND SU
-
     IF(ltime) THEN
       aptt=celcp(ij)*deno(ij)*vol*dtr
       su(ij)=su(ij)+(one+gamt)*aptt*to(ij)-half*gamt*aptt*too(ij)
@@ -130,7 +129,7 @@ DO i=2,nim
     ENDIF
 
     IF(putobj)THEN
-      su(ij) = su(ij) + fdst(ij)
+      su(ij) = su(ij) + fdst(ij)  !- p(ij)*(dux(ij) + dvy(ij))*vol
     ENDIF
   END DO
 END DO

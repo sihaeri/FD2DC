@@ -22,7 +22,8 @@ USE shared_data,        ONLY : urf,iu,iv,p,su,sv,apu,apv,nim,njm,&
                                dvx,dvy,dux,duy,densit,temp_visc,lamvisc,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
-                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celbeta
+                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celbeta,&
+                               fdfcu,fdfcv
 USE modfd_set_bc,       ONLY : fd_bcpressure,fd_bcuv,fd_calc_bcuv_grad
 USE precision,          ONLY : r_single
 USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual
@@ -232,11 +233,11 @@ DO i=2,nim
 
     IF(putobj)THEN
       IF(nfil > 0)THEN
-        su(ij) = su(ij) + ibsu(ij) + fdsu(ij) + (den(ij)-densit) * gravx * vol
-        sv(ij) = sv(ij) + ibsv(ij) + fdsv(ij) + (den(ij)-densit) * gravy * vol
+        su(ij) = su(ij) + ibsu(ij) + fdsu(ij) + (den(ij)-densit) * gravx * vol !+ fdfcu(ij) 
+        sv(ij) = sv(ij) + ibsv(ij) + fdsv(ij) + (den(ij)-densit) * gravy * vol !+ fdfcv(ij)
       ELSE
-        su(ij) = su(ij) + fdsu(ij) + (den(ij)-densit) * gravx * vol
-        sv(ij) = sv(ij) + fdsv(ij) + (den(ij)-densit) * gravy * vol
+        su(ij) = su(ij) + fdsu(ij) + (den(ij)-densit) * gravx * vol !+ fdfcu(ij)
+        sv(ij) = sv(ij) + fdsv(ij) + (den(ij)-densit) * gravy * vol !+ fdfcv(ij)
       ENDIF
     ENDIF
   END DO
