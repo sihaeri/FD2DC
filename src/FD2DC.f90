@@ -15,8 +15,9 @@ USE shared_data,         ONLY : lread,itim,itst,louts,lcal,iu,iv,ip,ien,u,p,v,t,
                                 nobjcells,nsurfpoints,objcellvertx,objcellverty,objcentu,objcentv,objcentx,&
                                 objcenty,stationary,th,movingmesh,dxmeanmoved,dxmean,dxmeanmovedtot,&
                                 lamvisc,temp_visc,tc,ulid,objradius,naverage_steps,calclocalnusselt_ave,objcentom,&
-                                voo,uoo,ft1,ft2,den,deno,celbeta,celcp,celkappa,too,calcwalnusselt
-USE parameters,          ONLY : out_unit,eres_unit,plt_unit,force_predict,force_correct,do_collect_stat,end_collect_stat
+                                voo,uoo,ft1,ft2,den,deno,celbeta,celcp,celkappa,too,calcwalnusselt,use_gpu
+USE parameters,          ONLY : out_unit,eres_unit,plt_unit,force_predict,force_correct,do_collect_stat,end_collect_stat,&
+                                use_GPU_yes
 USE modfd_set_bc,        ONLY : fd_bctime,fd_bcout
 USE modfd_calc_pre,      ONLY : fd_calc_pre
 USE modfd_calc_temp,     ONLY : fd_calc_temp
@@ -28,10 +29,11 @@ USE modfd_tecwrite,      ONLY : fd_tecwrite_eul,fd_tecwrite_fil,fd_tecwrite_sph_
 USE modfd_create_geom,   ONLY : fd_calc_sources,fd_calc_mi,fd_calc_ori,fd_calc_pos,fd_calc_physprops,fd_copy_oldvel,&
                                 fd_move_mesh,fd_calculate_stats,fd_calc_part_collision
 USE modfil_create_geom,  ONLY : fil_sol_tension,fil_sol_positions,fil_calc_sources
+USE modcu_BiCGSTAB,      ONLY : cu_shutdown
 use omp_lib
 IMPLICIT NONE
 LOGICAL         :: ismoved
-INTEGER         :: itims,itime,ijmon,iter,n,i,j,ij,m,maxfl,l,nn,npoint
+INTEGER         :: itims,itime,ijmon,iter,n,i,j,ij,m,maxfl,l,nn,npoint,err
 REAL(KIND = r_single) :: source,fd_resor,cd,cl,avenusselt,vb_resor,dummy
 REAL(KIND = r_single),ALLOCATABLE :: wallocnusselt(:)
 DOUBLE PRECISION      :: delt1,delt2,T1,T2
@@ -291,6 +293,7 @@ ELSE
 ENDIF
 
 
+IF(use_GPU == use_GPU_yes)CALL cu_shutdown(err)
 
 600 FORMAT(1X,'ITER.',3X,&
            'I---------ABSOLUTE RESIDUAL SOURCE SUMS--------I',3X,&
