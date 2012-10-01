@@ -87,31 +87,6 @@ END INTERFACE
 
 CONTAINS
 
-!SUBROUTINE squareIt(A,N)
-!
-!USE, INTRINSIC  ::  iso_c_binding
-!
-!IMPLICIT NONE
-!
-!REAL     :: A(*)
-!INTEGER  :: N
-!
-!INTERFACE
-!
-!  SUBROUTINE squareMe(A, N) BIND (C,name='squareMyArray')
-!
-!    USE, INTRINSIC  :: iso_c_binding , ONLY : c_int , c_float
-!    REAL(c_float) :: A(*)
-!    INTEGER,VALUE :: N
-!  
-!  END SUBROUTINE squareMe
-!
-!END INTERFACE
-!
-!CALL squareMe(A,N)
-!
-!END SUBROUTINE squareIt
-
 SUBROUTINE cu_getInstance(err)
   IMPLICIT NONE
   INTEGER,INTENT(OUT) :: err
