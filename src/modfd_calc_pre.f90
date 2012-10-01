@@ -6,7 +6,8 @@ CONTAINS
 !============================================
 SUBROUTINE fd_calc_pre
 
-USE parameters,         ONLY : out_unit,solver_sparsekit,solver_sip,solver_cg,solver_hypre
+USE parameters,         ONLY : out_unit,solver_sparsekit,solver_sip,solver_cg,solver_hypre,OPSUCCESS,SOLVER_DONE,&
+                               use_GPU_yes,SOLVER_FAILED
 USE real_parameters,    ONLY : one,zero,half,two,four
 USE precision,          ONLY : r_single
 USE modfd_set_bc,       ONLY : fd_bcpressure
@@ -19,9 +20,11 @@ USE shared_data,        ONLY : urf,ip,p,su,apu,apv,nim,njm,&
                                dux,duy,dvx,dvy,fdsuc,fdsvc,fdsub,fdsvb,putobj,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,dt,&
-                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celcp
+                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celcp,use_GPU
 USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual,&
-                                    fd_solve_cgs2d
+                                    fd_solve_cgs2d,fd_cooVal_create
+USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGSTAB_itr,&
+                                 cu_cpD2H_solDP
 IMPLICIT NONE
 REAL(KIND = r_single) :: fxe,fxp,dxpe,s,d,difft,fyn,fyp,dypn,&
                          dx,dy,rp,ppe,ppw,ppn,pps,dpxel,&
@@ -29,7 +32,7 @@ REAL(KIND = r_single) :: fxe,fxp,dxpe,s,d,difft,fyn,fyp,dypn,&
                          vn,sum,ppo,dpxe,dpyn,pcor !,&
                          !duxel,duxe,dvynl,dvyn,fdsuce,fdsvcn,dfyn,dfxe,c,K
 
-INTEGER               :: ij,i,j,ije,ijn,ijpref,ipar(16),debug
+INTEGER               :: ij,i,j,ije,ijn,ijpref,ipar(16),debug,error
 REAL                  :: fpar(16),aet(nij),ant(nij)
 
 debug = 0
@@ -178,32 +181,60 @@ IF(ltest) WRITE(2,*) '       SUM = ',SUM
 !--SOLVE EQUATIONS SYSTEM FOR P' AND APPLY CORRECTIONS
 IF(solver_type == solver_sparsekit)THEN
   
-  CALL fd_spkit_interface(ap,as,an,aw,ae,su,pp)
-  CALL coocsr(Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc)
-  
-  SOL = 0.0
-  ipar  =  0
-  fpar  = 0.0
-  
-  !--preconditioner
-  !ipar(2) = 1     ! 1=left, 2=right
-  ipar(2) = 0           ! 0 == no preconditioning
-  ipar(3) = 0
-  ipar(4) = NNZ*8       ! workspace for BGStab
-  ipar(6) = nsw(ip)     ! maximum number of matrix-vector multiplies
+   SOL = 0.0
+  IF(use_GPU == use_GPU_yes)THEN
+    
+    CALL fd_cooVal_create(ap,as,an,aw,ae,su,pp)
 
-  fpar(1) = sor(ip)  ! relative tolerance, must be between (0, 1)
-  fpar(2) = 0.0      ! absolute tolerance, must be positive
+    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
+    IF(error /= OPSUCCESS)GOTO 100
+    
+    CALL cu_BiCGSTAB_setStop(nsw(ip),sor(ip),error)
+    IF(error /= OPSUCCESS)GOTO 100
+    
+    CALL  cu_BiCGSTAB_itr(resor(ip),ipar(1),error)
+    IF(error /= SOLVER_DONE)GOTO 100
+    
+    CALL  cu_cpD2H_solDP(sol,error)
+    IF(error /= OPSUCCESS)GOTO 100
+    
+    CALL copy_solution(pp,sol)
 
-      !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
-      !                       WORK,Acsr,Aclc,Arwc)
-  CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
-                        WORK, Acsr,Aclc,Arwc,        &
-	                         NNZ,  Alu,Jlu,Ju,Jw          )
-  
-  CALL copy_solution(pp,sol)
+    100 CONTINUE
+    IF(error /= OPSUCCESS .OR. error == SOLVER_FAILED)THEN
+      WRITE(*,*)'GPU--solver problem.'
+      PAUSE
+    ENDIF
+  ELSE
+      
+      CALL fd_cooVal_create(ap,as,an,aw,ae,su,pp)
+      CALL coocsr(Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc)
 
-  !CALL calc_residual(ap,as,an,aw,ae,su,pp,resor(ip))
+      ipar  =  0
+      fpar  = 0.0
+      
+      !--preconditioner
+      !ipar(2) = 1     ! 1=left, 2=right
+      ipar(2) = 0           ! 0 == no preconditioning
+      ipar(3) = 0
+      ipar(4) = NNZ*8       ! workspace for BGStab
+      ipar(6) = nsw(ip)     ! maximum number of matrix-vector multiplies
+    
+      fpar(1) = sor(ip)  ! relative tolerance, must be between (0, 1)
+      fpar(2) = 0.0      ! absolute tolerance, must be positive
+    
+          !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
+          !                       WORK,Acsr,Aclc,Arwc)
+      CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
+                            WORK, Acsr,Aclc,Arwc,        &
+    	                         NNZ,  Alu,Jlu,Ju,Jw          )
+   
+     CALL copy_solution(pp,sol)
+
+     CALL calc_residual(ap,as,an,aw,ae,su,pp,resor(ip))
+
+   ENDIF
+    
 
 ELSEIF(solver_type == solver_sip)THEN
 

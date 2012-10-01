@@ -568,7 +568,7 @@ END SUBROUTINE find_objcells
 SUBROUTINE fd_track_single_point(xp,yp,ipo,jpo,ip,jp,interpx,interpy,error)
 
 USE precision,      ONLY : r_single
-USE shared_data,    ONLY : x,y,deltalen,xc,yc
+USE shared_data,    ONLY : x,y,deltalen,xc,yc,nim,njm
 USE parameters,     ONLY : maxmove
 
 IMPLICIT NONE
@@ -578,6 +578,7 @@ INTEGER                            :: i
 
 error = 0
 DO i = ipo - maxmove,ipo + maxmove
+  IF(i <= 1 .OR. i > nim)CYCLE
   IF(xp <= x(i) .AND. xp > x(i-1))THEN
     ip = i
     EXIT
@@ -590,6 +591,7 @@ IF( i == ipo + maxmove + 1)THEN
 ENDIF
       
 DO i = jpo - maxmove,jpo + maxmove
+  IF(i <= 1 .OR. i > njm)CYCLE
   IF(yp <= y(i) .AND. yp > y(i-1))THEN
     jp = i
     EXIT
@@ -992,7 +994,8 @@ SUBROUTINE fd_calc_physprops(outvolp)
 USE precision,          ONLY : r_single
 USE shared_data,        ONLY : nij,x,y,objpoint_cvx,objpoint_cvy,nsphere,nobjcells,objcellvol,den,deno,densit,&
                                xc,yc,objcellx,objcelly,li,nim,njm,densitp,objpoint_interpx,objpoint_interpy,&
-                               celbeta,beta,betap,celkappa,celcp,cpf,cpp,kappaf,kappap,lcal,ien
+                               celbeta,beta,betap,celkappa,celcp,cpf,cpp,kappaf,kappap,lcal,ien,&
+                               objcell_overlap
 USE real_parameters,    ONLY : zero,one
 IMPLICIT NONE
 
@@ -1011,14 +1014,16 @@ celbeta = beta
 DO nn = 1,nsphere
   volp = zero
   DO n = 1,nobjcells(nn)
-    DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
-      dx = x(i) - x(i-1)
-      DO j = objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
-        dy = y(j) - y(j-1)
-        del = fd_calc_delta(xc(i),yc(j),objcellx(n,nn),objcelly(n,nn),dx, dy)*objcellvol(n,nn)
-        volp(li(i)+j) = volp(li(i)+j) + del
+    !IF(objcell_overlap(n,nn) == 0)THEN
+      DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
+        dx = x(i) - x(i-1)
+        DO j = objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
+          dy = y(j) - y(j-1)
+          del = fd_calc_delta(xc(i),yc(j),objcellx(n,nn),objcelly(n,nn),dx, dy)*objcellvol(n,nn)
+          volp(li(i)+j) = volp(li(i)+j) + del
+        ENDDO
       ENDDO
-    ENDDO
+    !ENDIF
   ENDDO
   IF(PRESENT(outvolp))THEN
     outvolp(:,nn) = volp(:)
@@ -1089,7 +1094,11 @@ REAL(KIND = r_single) :: alpha,c,s,sigma
 DO nn = 1,nsphere
   !--angular velocity vector is (0,0,omega)
   alpha = ABS(objcentom(nn))*dt
-  sigma = objcentom(nn)/ABS(objcentom(nn)) 
+  IF(ABS(objcentom(nn)) > zero)THEN
+    sigma = objcentom(nn)/ABS(objcentom(nn)) 
+  ELSE
+    sigma = zero
+  ENDIF
   c     = COS(alpha)
   s     = SIN(alpha)
   objcento(1,nn) = c
@@ -1449,7 +1458,6 @@ IMPLICIT NONE
 
     CHARACTER(LEN=5) :: filenum(nsphere+1)
     CHARACTER(LEN=80)::dummy,geomName
-    CHARACTER(LEN=120)::str
     INTEGER :: NUMNP,NELEM,NGRPS,NBSETS,NDFCD,NDFVL,MaxNELEM,j,n,i,eType,np,n1,n2,n3,n4
     REAL(KIND = r_single),ALLOCATABLE:: nodePos(:,:)
     REAL(KIND = r_single)            :: x,y,vec1(2),vec2(2)
@@ -1705,7 +1713,7 @@ IMPLICIT NONE
 INTEGER ,PARAMETER :: celdivfac = 10
 REAL(KIND = r_single),INTENT(INOUT) :: volp(nij,nsphere)
 INTEGER   ::  i,j,ij,ximin,ximax,yimin,yimax,nn,v,inv,ii,jj,n,inc
-REAL(KIND = r_single) :: xmin,ymin,xmax,ymax,margin,dx,dy,vx(4),vy(4),ddx,ddy,&
+REAL(KIND = r_single) :: xmin,ymin,xmax,ymax,margin,dx,dy,vx(4),vy(4),&
                           celx(celdivfac+1),cely(celdivfac+1),&
                           celxc(celdivfac),celyc(celdivfac),xy(2)
 
@@ -2220,10 +2228,10 @@ END FUNCTION fd_calc_delta2
 
 SUBROUTINE fd_calc_part_collision
 
-!--A naive collision strategy, Only for O(100) spherical particles  
+!--A naive collision strategy, Only for O(10^3) spherical particles  
 
 USE shared_data,      ONLY : nsphere,objcentx,objcenty,Fpq,Fpw,gravx,gravy,x,y,objradius
-USE real_parameters,  ONLY : zero,two
+USE real_parameters,  ONLY : zero,two,epsilonP,five,ten
 USE precision,        ONLY : r_single
 
 IMPLICIT NONE
@@ -2240,7 +2248,7 @@ g = SQRT(gravx**2+gravy**2)
 DO p = 1,nsphere
   DO q = 1,nsphere
     IF(p /= q)THEN
-      Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q),p,q)
+      Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q),p,q,five/two*epsilonP)
     ENDIF
   ENDDO
 ENDDO
@@ -2253,29 +2261,29 @@ maxy = MAXVAL(y,1)
 !--Particle-wall collision, (Mirror image)
 DO p = 1,nsphere 
   !--e wall
-  Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p)
+  Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p,two*ten*epsilonP)
   !--w wall
-  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p)
+  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p,two*ten*epsilonP)
   !--n wall
-  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p)
+  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p,two*ten*epsilonP)
   !--s wall
-  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p)
+  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p,two*ten*epsilonP)
 ENDDO
 
 END SUBROUTINE fd_calc_part_collision
 
-FUNCTION fd_calc_binary_colforce(xp,yp,xq,yq,p,q)
+FUNCTION fd_calc_binary_colforce(xp,yp,xq,yq,p,q,epsilonP)
 
-!--Suggested by Glowinsky 1995, Only forces in normal direction and soft (plastic) collisions 
+!--Suggested by Glowinsky 1995, Only forces in normal direction  
 
 USE shared_data,    ONLY : dxmean,densitp,objvol,objradius
 USE precision,      ONLY : r_single
-USE real_parameters,ONLY : distfactor,zero,half,epsilonP,one
+USE real_parameters,ONLY : distfactor,zero,half,one
 
 IMPLICIT NONE 
 
 REAL(KIND = r_single) :: fd_calc_binary_colforce(2)
-REAL(KIND = r_single),INTENT(IN)  :: xp,yp,xq,yq
+REAL(KIND = r_single),INTENT(IN)  :: xp,yp,xq,yq,epsilonP
 INTEGER              ,INTENT(IN)  :: p,q
 REAL(KIND = r_single)             :: pq(2),dpq !-unit vect and distance between two centres
 
@@ -2293,7 +2301,7 @@ END FUNCTION fd_calc_binary_colforce
 SUBROUTINE fd_find_overlap
 
 USE precision,      ONLY : r_single
-USE real_parameters,ONLY : distfactor,one
+USE real_parameters,ONLY : distfactor,one,sqrttwo
 USE shared_data,    ONLY : nobjcells,objpoint_cvx,objpoint_cvy,&
                            nsphere,objcell_overlap,deltalen,dxmean,objcellx,objcelly
 
@@ -2311,7 +2319,7 @@ DO nn = 1,nsphere
       DO m = 1,nobjcells(mm)
         IF(objcell_overlap(m,mm) /= 0)CYCLE
         dist = SQRT( (objcellx(m,mm) - objcellx(n,nn))**2 + (objcelly(m,mm) - objcelly(n,nn))**2 )
-        IF(dist < (distfactor+one)*dxmean)objcell_overlap(m,mm) = nn
+        IF(dist < (deltalen+one)*dxmean*sqrttwo)objcell_overlap(m,mm) = nn
       ENDDO
     ENDDO
   
@@ -2319,7 +2327,7 @@ DO nn = 1,nsphere
 ENDDO
 
 DO mm = 1,nsphere
-  WRITE(*,*)COUNT(objcell_overlap(:,mm) /= 0),', Lagrangian Cells are optet-out for sphere: ',mm
+  WRITE(*,*)COUNT(objcell_overlap(:,mm) /= 0),', Lagrangian Cells are opted-out for sphere: ',mm
 ENDDO
 
 END SUBROUTINE fd_find_overlap

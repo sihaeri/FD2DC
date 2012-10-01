@@ -41,7 +41,7 @@ USE shared_data, ONLY : problem_name,problem_len
 
 IMPLICIT NONE
 
-OPEN (UNIT=sres_unit,FILE=problem_name(1:problem_len)//'.ers',FORM='UNFORMATTED')
+OPEN(UNIT=sres_unit,FILE=problem_name(1:problem_len)//'.ers',FORM='UNFORMATTED')
 
 END SUBROUTINE fd_open_sres
 

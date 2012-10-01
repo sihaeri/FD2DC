@@ -4,7 +4,7 @@ USE precision,            ONLY : r_single
 
 IMPLICIT NONE
 !
-!.....................program constants (machine precision is about 7 digits)
+!.....................program constants
 !
 REAL(KIND=r_single), PARAMETER :: tiny    = 1.e-30_r_single
 REAL(KIND=r_single), PARAMETER :: vsmall  = 1.e-20_r_single

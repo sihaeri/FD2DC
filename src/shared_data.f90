@@ -4,6 +4,7 @@ USE parameters,     ONLY : nphi, max_char_len
 USE precision,      ONLY : r_single
 
 INTEGER     :: solver_type
+INTEGER     :: use_GPU
 LOGICAL     :: temp_visc !--Set to true in the problem setup for temperature dependant viscosity
 !-------------------------Part-1: INTEGERS-----------------------------------------!
 !-- ni, nj: number of grid points in x, y direction respectively (boundary included)
@@ -33,7 +34,10 @@ INTEGER,DIMENSION(:),ALLOCATABLE :: li(:),nsw(:)
 !-- ltime set true, unsteady calculation is performed.
 !-- laxis set to true, axi-symmetric geometry is assumed
 !-- lcal(i) set to true, ith variable is solved for
-
+LOGICAL :: initFromFile !--This just initializes the field from the output of a simple Eulerian run, 
+                        !--but it is only an initialization not a restart.
+                        !--having both lread = true and initFromFile = true, lread = true i.e it will 
+                        !--overwrite the initialized values
 LOGICAL :: lwrite,lread,ltest,laxis,louts,loute,ltime
 LOGICAL,ALLOCATABLE,DIMENSION(:) :: lcal
 
@@ -162,10 +166,11 @@ LOGICAL                       :: duct !--if true inlet outlet boundary
 !--isotherm:   set to false if particle has source term (variable temp), If true objqp should be set and objtp is the initial temp
 !--ibsu,ibsv: momentum sources similar to fdsu,fdsv
 !--naverage_steps: number of time steps to be included in time averaging (it is done on the last naverage_steps steps)
+!--calcwalnusselt: calculate the local nusselt number on the left wall.
 REAL(KIND = r_single),ALLOCATABLE,DIMENSION(:)     :: ibsu,ibsv
 INTEGER                       :: nsphere,nfil,filnprt,sphnprt,naverage_steps
 LOGICAL                       :: putobj,calcsurfforce,calclocalnusselt,read_fd_geom,stationary,movingmesh,&
-                                 forcedmotion,isotherm,calclocalnusselt_ave
+                                 forcedmotion,isotherm,calclocalnusselt_ave,calcwalnusselt
 REAL(KIND = r_single)         :: fd_urf,filgravx,filgravy,filfr,filalpha,filbeta,filgamma
 REAL(KIND = r_single)         :: dxmean,dxmeanmoved,dxmeanmovedtot
 

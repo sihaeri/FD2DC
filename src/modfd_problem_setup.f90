@@ -9,13 +9,13 @@ SUBROUTINE fd_problem_setup
 
 USE real_parameters,        ONLY : zero,one,two,pi,half
 USE parameters,             ONLY : set_unit,alloc_create,nphi,grd_unit,max_char_len,solver_sparsekit,solver_sip,&
-                                    solver_cg,solver_hypre,plt_unit
+                                    solver_cg,solver_hypre,plt_unit,init_field_unit,use_GPU_yes,use_GPU_no,OPSUCCESS
 USE precision,              ONLY : r_single
 USE shared_data,            ONLY : solver_type,NNZ,NCel,lli,itim,time,lread,lwrite,ltest,louts,loute,ltime,&
-                                   maxit,imon,jmon,ipr,jpr,sormax,slarge,alfa,minit,&
+                                   maxit,imon,jmon,ipr,jpr,sormax,slarge,alfa,minit,initFromFile,&
                                    densit,visc,gravx,gravy,beta,tref,problem_name,problem_len,lamvisc,&
-                                   ulid,tper,itst,nprt,dt,gamt,iu,iv,ip,ien,dtr,tper,&
-                                   nsw,lcal,sor,resor,urf,gds,om,cpf,kappaf,nim,njm,ni,nj,&
+                                   ulid,tper,itst,nprt,dt,gamt,iu,iv,ip,ien,dtr,tper,f1,f2,ft1,ft2,voo,uoo,too,&
+                                   nsw,lcal,sor,resor,urf,gds,om,cpf,kappaf,nim,njm,ni,nj,calcwalnusselt,&
                                    li,x,y,xc,yc,fx,fy,laxis,r,nij,u,v,nsw,sor,lcal,p,t,th,tc,den,deno,dxmean,&
                                    vo,uo,to,title,duct,flomas,flomom,f1,ft1,stationary,celbeta,celkappa,celcp,&  !--FD aspect
                                    objcentx,objcenty,objradius,putobj,nsurfpoints,read_fd_geom,&
@@ -26,20 +26,26 @@ USE shared_data,            ONLY : solver_type,NNZ,NCel,lli,itim,time,lread,lwri
                                    filfirstposx,filfirstposy,fillasttheta,filnprt,filfr,& !--heat
                                    nnusseltpoints,calclocalnusselt,deltalen,sphnprt,betap,kappap,cpp,&
                                    mpi_comm,Hypre_A,Hypre_b,Hypre_x,nprocs_mpi,myrank_mpi,& !--viscosity temperature dependance
-                                   temp_visc,viscgamma,calclocalnusselt_ave,naverage_steps
+                                   temp_visc,viscgamma,calclocalnusselt_ave,naverage_steps,&
+                                   use_GPU,arow,acol,acoo,acsr,aclc,arwc
 
 USE modfd_set_bc,           ONLY : fd_bctime
 USE modfd_create_geom,      ONLY : fd_create_geom,fd_calc_mi,fd_calc_physprops,fd_calc_geom_volf,fd_calc_physprops,&
                                    fd_calc_quality
 USE modfil_create_geom,     ONLY : fil_create_geom
-USE modfd_tecwrite,     ONLY : fd_tecwrite_sph_s,fd_tecwrite_sph_v,fd_tecwrite_eul
+USE modfd_tecwrite,         ONLY : fd_tecwrite_sph_s,fd_tecwrite_sph_v,fd_tecwrite_eul
+
+USE modcu_BiCGSTAB,         ONLY : cu_getInstance,cu_initDevice,cu_allocDevice,cu_shutdown,cu_coo2csr,cu_cpH2D_coords
+USE modfd_solve_linearsys,  ONLY : fd_cooInd_create
 
 IMPLICIT NONE
 
-REAL(KIND = r_single) :: uin,vin,pin,tin,dx,dy,rp,domain_vol
-INTEGER               :: i,j,ij,ncell
+REAL(KIND = r_single) :: uin,vin,pin,tin,dx,dy,rp,domain_vol,rdummy
+INTEGER               :: i,j,ij,ncell,idummy,error
 !REAL(KIND = r_single),ALLOCATABLE :: volp(:,:),q(:)
 
+use_GPU = use_GPU_no
+error = OPSUCCESS
 solver_type = solver_sparsekit
 itim = 0
 time = zero
@@ -48,7 +54,7 @@ naverage_steps = 0
 CALL fd_alloc_solctrl_arrays(alloc_create)
 
 READ(set_unit,6)title
-READ(set_unit,*)lread,lwrite,ltest,laxis,louts,loute,ltime,duct
+READ(set_unit,*)lread,initFromFile,lwrite,ltest,laxis,louts,loute,ltime,duct
 READ(set_unit,*)maxit,minit,imon,jmon,ipr,jpr,sormax,slarge,alfa
 READ(set_unit,*)densit,visc,cpf,kappaf,gravx,gravy,beta,th,tc,tref
 READ(set_unit,*)uin,vin,pin,tin,ulid,tper
@@ -62,6 +68,7 @@ READ(set_unit,*)(gds(i),i=1,nphi)
 
 READ(set_unit,*)temp_visc
 IF(temp_visc)READ(set_unit,*)viscgamma
+READ(set_unit,*)calcwalnusselt
 READ(set_unit,*)putobj,read_fd_geom,stationary,forcedmotion,movingmesh,calcsurfforce,calclocalnusselt,isotherm
 IF(calclocalnusselt)READ(set_unit,*)calclocalnusselt_ave,naverage_steps
 IF(putobj)THEN
@@ -146,8 +153,34 @@ DO i=2,nim
 ENDDO
 
 NNZ = 2*(njm - 2)*(nim - 1) + 2*(nim - 2)*(njm - 1) + NCel
+IF(solver_type == solver_sparsekit .OR. solver_type == solver_hypre)THEN
+  
+  CALL fd_alloc_spkit_arrays(alloc_create)
+  CALL fd_cooInd_create()
 
-CALL fd_alloc_spkit_arrays(alloc_create)
+  IF(use_GPU == use_GPU_yes)THEN
+
+    !CALL fd_cooInd_create() !--Create coordinate arrays Arow, Acol
+    CALL cu_getInstance(error)
+    IF(error /= OPSUCCESS)GOTO 100
+    CALL cu_initDevice(error)
+    IF(error /= OPSUCCESS)GOTO 100
+    CALL cu_allocDevice(NNZ,NCel,error)
+    IF(error /= OPSUCCESS)GOTO 100
+    CALL cu_cpH2D_coords(Arow,Acol,error)
+    IF(error /= OPSUCCESS)GOTO 100
+    CALL cu_coo2csr(error)
+    IF(error /= OPSUCCESS)GOTO 100
+
+  ENDIF
+
+  100 CONTINUE
+  IF(error /= OPSUCCESS)THEN
+    WRITE(*,*)'Unable to start the GPU. Running the solve on the CPU instead...'
+    use_GPU = use_GPU_no
+    CALL cu_shutdown(error)
+  ENDIF
+ENDIF
 !IF(solver_type == solver_hypre)CALL solve_hypre_sys_init(mpi_comm,myrank_mpi,nprocs_mpi,ncel,Hypre_A,Hypre_b,Hypre_x) 
 
 !--cv centres
@@ -264,25 +297,38 @@ ENDIF
 
 
 !--INITIAL VARIBLE VALUES (INITIAL CONDITIONS)
-DO i=2,nim
-  DO ij=li(i)+2,li(i)+njm
-    u(ij)=uin
-    v(ij)=vin
-    t(ij)=tin
-    p(ij)=pin
-    uo(ij)=uin
-    vo(ij)=vin
-    to(ij)=tin
+IF(.NOT. initFromFile)THEN
+  DO i=2,nim
+    DO ij=li(i)+2,li(i)+njm
+      u(ij)=uin
+      v(ij)=vin
+      t(ij)=tin
+      p(ij)=pin
+      uo(ij)=uin
+      vo(ij)=vin
+      to(ij)=tin
+    END DO
   END DO
-END DO
 
-den  = densit
-deno = densit
-celbeta = beta
-celcp = cpf
-celkappa = kappaf
-lamvisc = visc
-
+  den  = densit
+  deno = densit
+  celbeta = beta
+  celcp = cpf
+  celkappa = kappaf
+  lamvisc = visc
+ELSE
+  OPEN(UNIT = init_field_unit,FILE=problem_name(1:problem_len)//'.ini',STATUS='OLD',FORM='UNFORMATTED')
+    READ(init_field_unit) idummy,rdummy,idummy,idummy,idummy,idummy,idummy,&
+         ((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
+         ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
+         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
+         (u(ij),ij=1,nij),(v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
+         (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
+         (uoo(ij),ij=1,nij),(voo(ij),ij=1,nij),(too(ij),ij=1,nij),&
+         (den(ij),ij=1,nij),(deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),&
+         (celcp(ij),ij=1,nij),(celkappa(ij),ij=1,nij)
+  CLOSE(init_field_unit)
+ENDIF
 IF(putobj)THEN
   IF(nsphere > 0)  CALL fd_calc_physprops
   deno = den

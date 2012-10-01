@@ -2,7 +2,7 @@ MODULE modfd_solve_linearsys
 
 PRIVATE
 PUBLIC :: fd_solve_sip2d,linsolve_gelem,fil_sol_tdma2,fil_sol_tdma,fd_spkit_interface,&
-          calc_residual,copy_solution,fd_solve_cgs2d
+          calc_residual,copy_solution,fd_solve_cgs2d,fd_cooInd_create,fd_cooVal_create
 CONTAINS
 !=====================================
 SUBROUTINE fd_solve_sip2d(ae,an,aw,as,ap,su,phi,li,ni,nj,nsweep,resor,sor)
@@ -591,4 +591,226 @@ INTEGER :: ic,i,j
   ENDDO
 
 END SUBROUTINE copy_solution
+
+SUBROUTINE fd_cooInd_create()
+  
+USE shared_data,      ONLY : Arow,Acol,nj,nim,njm,lli,li,nij,Ncel,SOL,RHS,NNZ
+USE precision,        ONLY : r_single
+IMPLICIT NONE
+
+INTEGER :: ia,i,j,ijn,ije,ijw,ijs,ij
+
+  ia = 0
+  DO i = 2,nim
+    IF( i == 2)THEN
+      DO j = 2,njm
+        ij = li(i) + j; ije=ij+nj; ijn=ij+1; ijw=ij-nj; ijs=ij-1
+        IF(j == 2)THEN
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+        ELSEIF(j == njm)THEN
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+        ELSE
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+        ENDIF
+      ENDDO
+    ELSEIF(i == nim)THEN
+       DO j = 2,njm
+        ij = li(i) + j; ije=ij+nj; ijn=ij+1; ijw=ij-nj; ijs=ij-1
+        IF(j == 2)THEN
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+        ELSEIF(j == njm)THEN
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+        ELSE
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+        ENDIF
+      ENDDO                       
+    ELSE
+       DO j = 2,njm
+        ij = li(i) + j; ije=ij+nj; ijn=ij+1; ijw=ij-nj; ijs=ij-1
+        IF(j == 2)THEN
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+        ELSEIF(j == njm)THEN
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+        ELSE
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+          ia = ia + 1
+          Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+        ENDIF
+      ENDDO 
+    ENDIF
+  ENDDO
+
+  IF(ia /= nnz)WRITE(*,*)'fd_spkit_interface:: ia = ',ia,' ,NNZ = ',NNZ
+
+END SUBROUTINE fd_cooInd_create
+
+SUBROUTINE fd_cooVal_create(ap,as,an,aw,ae,su,phi)
+  
+USE shared_data,      ONLY : Acoo,nj,nim,njm,lli,li,nij,Ncel,SOL,RHS,NNZ
+USE precision,        ONLY : r_single
+IMPLICIT NONE
+
+REAL(KIND = r_single) :: ap(nij),as(nij),an(nij),aw(nij),ae(nij),su(nij),phi(nij)
+INTEGER :: ia,i,j,ijn,ije,ijw,ijs,ij
+
+  ia = 0
+  DO i = 2,nim
+    IF( i == 2)THEN
+      DO j = 2,njm
+        ij = li(i) + j; ije=ij+nj; ijn=ij+1; ijw=ij-nj; ijs=ij-1
+        rhs(lli(ij)) = DBLE( su(ij) )
+        sol(lli(ij)) = DBLE( phi(ij))
+        IF(j == 2)THEN
+          ia = ia + 1
+          Acoo(ia) = DBLE( ae(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( an(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( ap(ij) )
+        ELSEIF(j == njm)THEN
+          ia = ia + 1
+          Acoo(ia) = DBLE( ae(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( as(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( ap(ij) )
+        ELSE
+          ia = ia + 1
+          Acoo(ia) = DBLE( ae(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( an(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( as(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( ap(ij) )
+        ENDIF
+      ENDDO
+    ELSEIF(i == nim)THEN
+       DO j = 2,njm
+        ij = li(i) + j; ije=ij+nj; ijn=ij+1; ijw=ij-nj; ijs=ij-1
+        rhs(lli(ij)) = DBLE( su(ij))
+        sol(lli(ij)) = DBLE(phi(ij))
+        IF(j == 2)THEN
+          ia = ia + 1
+          Acoo(ia) = DBLE( an(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( aw(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( ap(ij) )
+        ELSEIF(j == njm)THEN
+          ia = ia + 1
+          Acoo(ia) = DBLE( aw(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( as(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( ap(ij) )
+        ELSE
+          ia = ia + 1
+          Acoo(ia) = DBLE( an(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( aw(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( as(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( ap(ij) )
+        ENDIF
+      ENDDO                       
+    ELSE
+       DO j = 2,njm
+        ij = li(i) + j; ije=ij+nj; ijn=ij+1; ijw=ij-nj; ijs=ij-1
+        rhs(lli(ij)) = DBLE( su(ij) )
+        sol(lli(ij)) = DBLE( phi(ij))
+        IF(j == 2)THEN
+          ia = ia + 1
+          Acoo(ia) = DBLE( ae(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( an(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( aw(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( ap(ij) )
+        ELSEIF(j == njm)THEN
+          ia = ia + 1
+          Acoo(ia) = DBLE( ae(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( aw(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( as(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( ap(ij) )
+        ELSE
+          ia = ia + 1
+          Acoo(ia) = DBLE( ae(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( an(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( aw(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( as(ij) )
+          ia = ia + 1
+          Acoo(ia) = DBLE( ap(ij) )
+        ENDIF
+      ENDDO 
+    ENDIF
+  ENDDO
+
+  IF(ia /= nnz)WRITE(*,*)'fd_spkit_interface:: ia = ',ia,' ,NNZ = ',NNZ
+END SUBROUTINE fd_cooVal_create
+
+
 END MODULE  modfd_solve_linearsys

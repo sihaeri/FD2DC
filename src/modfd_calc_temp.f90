@@ -6,7 +6,8 @@ CONTAINS
 !=====================================
 SUBROUTINE fd_calc_temp
 !--Best to solve enthalpy, this is not very stable, but for now ....
-USE parameters,         ONLY : out_unit,solver_sparsekit,solver_sip,solver_cg,solver_hypre
+USE parameters,         ONLY : out_unit,solver_sparsekit,solver_sip,solver_cg,solver_hypre,use_GPU_yes,OPSUCCESS,SOLVER_DONE,&
+                               SOLVER_FAILED
 USE real_parameters,    ONLY : one,zero,half
 USE precision,          ONLY : r_single
 USE modfd_set_bc,       ONLY : fd_bctemp
@@ -18,13 +19,15 @@ USE shared_data,        ONLY : urf,ien,t,to,too,su,nim,njm,&
                                putobj,fdst,dtx,dty,apt,ft1,ft2,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
-                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,dux,dvy,p
-USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual
+                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,dux,dvy,p,use_GPU
+USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual,fd_cooVal_create
+USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGSTAB_itr,&
+                                  cu_cpD2H_solDP
 
 IMPLICIT NONE
 REAL(KIND = r_single) :: urfi,fxe,fxp,dxpe,s,d,fyn,fyp,dypn,cn,&
                          ce,cp,dx,dy,rp,fuds,fcds,vol,aptt,te,tw,ts,tn
-INTEGER               :: ij,i,j,ije,ijn,ipar(16),debug
+INTEGER               :: ij,i,j,ije,ijn,ipar(16),debug,error
 REAL                  :: fpar(16)
 
 debug = 0
@@ -147,32 +150,60 @@ DO i=2,nim
 END DO
 
 IF(solver_type == solver_sparsekit)THEN
-  
-  CALL fd_spkit_interface(ap,as,an,aw,ae,su,t)
-  CALL coocsr(Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc)
-  
-  ipar  =  0
-  fpar  = 0.0
-  
-  !--preconditioner
-  !ipar(2) = 1     ! 1=left, 2=right
-  ipar(2) = 0           ! 0 == no preconditioning
-  ipar(3) = 0
-  ipar(4) = NNZ*8       ! workspace for BGStab
-  ipar(6) = nsw(ien)         ! maximum number of matrix-vector multiplies
 
-  fpar(1) = sor(ien)  ! relative tolerance, must be between (0, 1)
-  fpar(2) = 0.0  ! absolute tolerance, must be positive
-
-      !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
-      !                       WORK,Acsr,Aclc,Arwc)
-  CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
-                        WORK, Acsr,Aclc,Arwc,        &
-	                         NNZ,  Alu,Jlu,Ju,Jw          )
   
-  CALL copy_solution(t,sol)
+  IF(use_GPU == use_GPU_yes)THEN
+    
+    CALL fd_cooVal_create(ap,as,an,aw,ae,su,t)
+
+    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
+    IF(error /= OPSUCCESS)GOTO 100
+    
+    CALL cu_BiCGSTAB_setStop(nsw(ien),sor(ien),error)
+    IF(error /= OPSUCCESS)GOTO 100
+    
+    CALL  cu_BiCGSTAB_itr(resor(ien),ipar(1),error)
+    IF(error /= SOLVER_DONE)GOTO 100
+    
+    CALL  cu_cpD2H_solDP(sol,error)
+    IF(error /= OPSUCCESS)GOTO 100
+    
+    CALL copy_solution(t,sol)
+
+    100 CONTINUE
+    IF(error /= OPSUCCESS .OR. error == SOLVER_FAILED)THEN
+      WRITE(*,*)'GPU--solver problem.'
+      PAUSE
+    ENDIF
+  ELSE
+    
+    CALL fd_cooVal_create(ap,as,an,aw,ae,su,t)
+    CALL coocsr(Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc)
+  
+    ipar  =  0
+    fpar  = 0.0
+  
+    !--preconditioner
+    !ipar(2) = 1     ! 1=left, 2=right
+    ipar(2) = 0           ! 0 == no preconditioning
+    ipar(3) = 0
+    ipar(4) = NNZ*8       ! workspace for BGStab
+    ipar(6) = nsw(ien)         ! maximum number of matrix-vector multiplies
+
+    fpar(1) = sor(ien)  ! relative tolerance, must be between (0, 1)
+    fpar(2) = 0.0  ! absolute tolerance, must be positive
+
+        !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
+        !                       WORK,Acsr,Aclc,Arwc)
+    CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
+                          WORK, Acsr,Aclc,Arwc,        &
+	                           NNZ,  Alu,Jlu,Ju,Jw          )
+  
+    CALL copy_solution(t,sol)
  
-  CALL calc_residual(ap,as,an,aw,ae,su,t,resor(ien))
+    CALL calc_residual(ap,as,an,aw,ae,su,t,resor(ien))
+  
+  ENDIF
 
 ELSEIF(solver_type == solver_sip)THEN
   

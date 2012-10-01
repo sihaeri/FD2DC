@@ -11,7 +11,8 @@ SUBROUTINE fd_calc_mom
 !--update the velocity components. Constant fluid 
 !--properties are assumed (parts of diffusive fluxes
 !--cancel out)
-USE parameters,         ONLY : out_unit,solver_sparsekit,solver_sip,solver_cg,solver_hypre
+USE parameters,         ONLY : out_unit,solver_sparsekit,solver_sip,solver_cg,solver_hypre,use_GPU_yes,OPSUCCESS,SOLVER_DONE,&
+                               SOLVER_FAILED
 USE real_parameters,    ONLY : one,zero,half
 USE shared_data,        ONLY : urf,iu,iv,p,su,sv,apu,apv,nim,njm,&
                                xc,ni,nj,li,fx,y,r,su,sv,gds,&
@@ -23,18 +24,19 @@ USE shared_data,        ONLY : urf,iu,iv,p,su,sv,apu,apv,nim,njm,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
                                Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celbeta,&
-                               fdfcu,fdfcv
+                               fdfcu,fdfcv,use_GPU
 USE modfd_set_bc,       ONLY : fd_bcpressure,fd_bcuv,fd_calc_bcuv_grad
 USE precision,          ONLY : r_single
-USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual
-
+USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual,fd_cooVal_create
+USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGSTAB_itr,&
+                                  cu_cpD2H_solDP
 IMPLICIT NONE
 
 REAL(KIND = r_single) :: urfu,urfv,fxe,fxp,dxpe,s,d,cp,ce,&
                          fuuds,fvuds,fucds,fvcds,fyn,fyp,dypn,&
                          dx,dy,rp,vol,sb,pe,pw,pn,ps,apt,cn,&
                          vele,velw,veln,vels,due,dve,dun,dvn,visi
-INTEGER               :: ij,i,j,ije,ijn,ipar(16),debug
+INTEGER               :: ij,i,j,ije,ijn,ipar(16),debug,error
 REAL                  :: fpar(16)
 
 debug = 0
@@ -258,31 +260,59 @@ END DO
 
 IF(solver_type == solver_sparsekit)THEN
   
-  CALL fd_spkit_interface(ap,as,an,aw,ae,su,u)
-  CALL coocsr(Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc)
-  
-  ipar  =  0
-  fpar  = 0.0
-  
-  !--preconditioner
-  !ipar(2) = 1     ! 1=left, 2=right
-  ipar(2) = 0           ! 0 == no preconditioning
-  ipar(3) = 0
-  ipar(4) = NNZ*8       ! workspace for BGStab
-  ipar(6) = nsw(iv)         ! maximum number of matrix-vector multiplies
+  IF(use_GPU == use_GPU_yes)THEN
+    
+    CALL fd_cooVal_create(ap,as,an,aw,ae,su,u)
 
-  fpar(1) = sor(iu)  ! relative tolerance, must be between (0, 1)
-  fpar(2) = 0.0  ! absolute tolerance, must be positive
+    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
+    IF(error /= OPSUCCESS)GOTO 100
+    
+    CALL cu_BiCGSTAB_setStop(nsw(iu),sor(iu),error)
+    IF(error /= OPSUCCESS)GOTO 100
+    
+    CALL  cu_BiCGSTAB_itr(resor(iu),ipar(1),error)
+    IF(error /= SOLVER_DONE)GOTO 100
+    
+    CALL  cu_cpD2H_solDP(sol,error)
+    IF(error /= OPSUCCESS)GOTO 100
+    
+    CALL copy_solution(u,sol)
 
-      !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
-      !                       WORK,Acsr,Aclc,Arwc)
-  CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
-                        WORK, Acsr,Aclc,Arwc,        &
-	                         NNZ,  Alu,Jlu,Ju,Jw          )
+    100 CONTINUE
+    IF(error /= OPSUCCESS .OR. error == SOLVER_FAILED)THEN
+      WRITE(*,*)'GPU--solver problem.'
+      PAUSE
+    ENDIF
+  ELSE
+    
+    CALL fd_cooVal_create(ap,as,an,aw,ae,su,u)
+    CALL coocsr(Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc)
+
+    ipar  =  0
+    fpar  = 0.0
   
-  CALL copy_solution(u,sol)
+    !--preconditioner
+    !ipar(2) = 1     ! 1=left, 2=right
+    ipar(2) = 0           ! 0 == no preconditioning
+    ipar(3) = 0
+    ipar(4) = NNZ*8       ! workspace for BGStab
+    ipar(6) = nsw(iu)         ! maximum number of matrix-vector multiplies
+
+    fpar(1) = sor(iu)  ! relative tolerance, must be between (0, 1)
+    fpar(2) = 0.0  ! absolute tolerance, must be positive
+
+        !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
+        !                       WORK,Acsr,Aclc,Arwc)
+    CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
+                          WORK, Acsr,Aclc,Arwc,        &
+	                           NNZ,  Alu,Jlu,Ju,Jw          )
+  
+
+    CALL copy_solution(u,sol)
  
-  CALL calc_residual(ap,as,an,aw,ae,su,u,resor(iu))
+    CALL calc_residual(ap,as,an,aw,ae,su,u,resor(iu))
+
+  ENDIF
 
 ELSEIF(solver_type == solver_sip)THEN
   
@@ -309,32 +339,58 @@ END DO
 
 IF(solver_type == solver_sparsekit)THEN
   
-  CALL calc_residual(ap,as,an,aw,ae,sv,v,resor(iv))
-  CALL fd_spkit_interface(ap,as,an,aw,ae,sv,v)
-  CALL coocsr(Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc)
-  
-  ipar  =  0
-  fpar  = 0.0
-  
-  !--preconditioner
-  !ipar(2) = 1     ! 1=left, 2=right
-  ipar(2) = 0           ! 0 == no preconditioning
-  ipar(3) = 0
-  ipar(4) = NNZ*8       ! workspace for BGStab
-  ipar(6) = nsw(iv)         ! maximum number of matrix-vector multiplies
+  IF(use_GPU == use_GPU_yes)THEN
+    
+    CALL fd_cooVal_create(ap,as,an,aw,ae,sv,v)
 
-  fpar(1) = sor(iv)  ! relative tolerance, must be between (0, 1)
-  fpar(2) = 0.0  ! absolute tolerance, must be positive
+    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
+    IF(error /= OPSUCCESS)GOTO 200
+    
+    CALL cu_BiCGSTAB_setStop(nsw(iv),sor(iv),error)
+    IF(error /= OPSUCCESS)GOTO 200
+    
+    CALL  cu_BiCGSTAB_itr(resor(iv),ipar(1),error)
+    IF(error /= SOLVER_DONE)GOTO 200
+    
+    CALL  cu_cpD2H_solDP(sol,error)
+    IF(error /= OPSUCCESS)GOTO 200
+    
+    CALL copy_solution(v,sol)
 
-      !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
-      !                       WORK,Acsr,Aclc,Arwc)
-  CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
-                        WORK, Acsr,Aclc,Arwc,        &
-	                         NNZ,  Alu,Jlu,Ju,Jw          )
+    200 CONTINUE
+    IF(error /= OPSUCCESS .OR. error == SOLVER_FAILED)THEN
+      WRITE(*,*)'GPU--solver problem.'
+      PAUSE
+    ENDIF
+  ELSE
+    
+    CALL fd_cooVal_create(ap,as,an,aw,ae,sv,v)
+    CALL coocsr(Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc)
+
+    ipar  =  0
+    fpar  = 0.0
   
-  CALL copy_solution(v,sol)
- 
-  CALL calc_residual(ap,as,an,aw,ae,sv,v,resor(iv))
+    !--preconditioner
+    !ipar(2) = 1     ! 1=left, 2=right
+    ipar(2) = 0           ! 0 == no preconditioning
+    ipar(3) = 0
+    ipar(4) = NNZ*8       ! workspace for BGStab
+    ipar(6) = nsw(iv)         ! maximum number of matrix-vector multiplies
+
+    fpar(1) = sor(iv)  ! relative tolerance, must be between (0, 1)
+    fpar(2) = 0.0  ! absolute tolerance, must be positive
+
+        !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
+        !                       WORK,Acsr,Aclc,Arwc)
+    CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
+                          WORK, Acsr,Aclc,Arwc,        &
+	                           NNZ,  Alu,Jlu,Ju,Jw          )
+
+    CALL copy_solution(v,sol)
+
+    CALL calc_residual(ap,as,an,aw,ae,sv,v,resor(iv))
+
+  ENDIF
 
 ELSEIF(solver_type == solver_sip)THEN
 

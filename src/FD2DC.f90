@@ -14,7 +14,8 @@ USE shared_data,         ONLY : lread,itim,itst,louts,lcal,iu,iv,ip,ien,u,p,v,t,
                                 nsphere,nfil,filfirstposy,sphnprt,surfpointx,surfpointy,objcellx,objcelly,&
                                 nobjcells,nsurfpoints,objcellvertx,objcellverty,objcentu,objcentv,objcentx,&
                                 objcenty,stationary,th,movingmesh,dxmeanmoved,dxmean,dxmeanmovedtot,&
-                                lamvisc,temp_visc,tc,ulid,objradius,naverage_steps,calclocalnusselt_ave,objcentom
+                                lamvisc,temp_visc,tc,ulid,objradius,naverage_steps,calclocalnusselt_ave,objcentom,&
+                                voo,uoo,ft1,ft2,den,deno,celbeta,celcp,celkappa,too,calcwalnusselt
 USE parameters,          ONLY : out_unit,eres_unit,plt_unit,force_predict,force_correct,do_collect_stat,end_collect_stat
 USE modfd_set_bc,        ONLY : fd_bctime,fd_bcout
 USE modfd_calc_pre,      ONLY : fd_calc_pre
@@ -58,18 +59,22 @@ m = 0
 l = 0
 
 IF(ltime .AND. lwrite)THEN
-  IF(nfil > 0 .AND. nsphere > 0)THEN
-    maxfl = MAX(itime/nprt,itime/filnprt,itime/sphnprt)
-  ELSEIF(nfil > 0 .AND. nsphere == 0)THEN
-    maxfl = MAX(itime/nprt,itime/filnprt)
-  ELSEIF(nfil == 0 .AND. nsphere > 0)THEN
-    maxfl = MAX(itime/nprt,itime/sphnprt)
+  IF(putobj)THEN
+    IF(nfil > 0 .AND. nsphere > 0)THEN
+      maxfl = MAX(itime/nprt,itime/filnprt,itime/sphnprt)
+    ELSEIF(nfil > 0 .AND. nsphere == 0)THEN
+      maxfl = MAX(itime/nprt,itime/filnprt)
+    ELSEIF(nfil == 0 .AND. nsphere > 0)THEN
+      maxfl = MAX(itime/nprt,itime/sphnprt)
+    ENDIF
+    ALLOCATE(filenum(maxfl),spherenum(nsphere))
+    CALL create_filenum(maxfl,filenum)
+    CALL create_filenum(nsphere,spherenum)
   ELSE
     maxfl = itime/nprt
+    ALLOCATE(filenum(maxfl))
+    CALL create_filenum(maxfl,filenum)
   ENDIF
-  ALLOCATE(filenum(maxfl),spherenum(nsphere))
-  CALL create_filenum(maxfl,filenum)
-  CALL create_filenum(nsphere,spherenum)
 ENDIF
 npoint = 0 !--for time steps used in time averaging 
 DO itim = itims,itime
@@ -182,7 +187,7 @@ DO itim = itims,itime
         CALL fd_tecwrite_eul(plt_unit)
       ENDIF
       CLOSE(plt_unit)
-      IF(calclocalnusselt .AND. .NOT. duct)THEN
+      IF(calcwalnusselt .AND. .NOT. duct)THEN
         OPEN(UNIT = plt_unit,FILE='wallnusselt'//filenum(n)//'.dat',STATUS='NEW')
         ALLOCATE(wallocnusselt(nj))
         CALL fd_calc_lwall_nusselt(wallocnusselt,th,tc)
@@ -263,13 +268,13 @@ IF(calclocalnusselt)THEN
     WRITE(1234,'(E12.5,1X)')avenusselt
   ENDDO
   CLOSE(1234)
-  OPEN(UNIT = 1234,FILE='walnusselt.dat',STATUS = 'UNKNOWN')
-  ALLOCATE(wallocnusselt(nj))
-  CALL fd_calc_wall_nusselt(wallocnusselt,th,1)
-  DO n=2,njm
-    WRITE(1234,'(2(E12.5,1X))') yc(n),wallocnusselt(n)
-  ENDDO
-  CLOSE(1234)
+  !OPEN(UNIT = 1234,FILE='walnusselt.dat',STATUS = 'UNKNOWN')
+  !ALLOCATE(wallocnusselt(nj))
+  !CALL fd_calc_wall_nusselt(wallocnusselt,th,1)
+  !DO n=2,njm
+  !  WRITE(1234,'(2(E12.5,1X))') yc(n),wallocnusselt(n)
+  !ENDDO
+  !CLOSE(1234)
 ENDIF
 IF(putobj)THEN
   CALL fd_write_restart
@@ -277,9 +282,12 @@ ELSE
   WRITE(eres_unit) itim,time,ni,nj,nim,njm,nij,&
          ((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
          ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
-         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(u(ij),ij=1,nij),&
-         (v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
-         (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij)
+         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
+         (u(ij),ij=1,nij),(v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
+         (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
+         (uoo(ij),ij=1,nij),(voo(ij),ij=1,nij),(too(ij),ij=1,nij),&
+         (den(ij),ij=1,nij),(deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),&
+         (celcp(ij),ij=1,nij),(celkappa(ij),ij=1,nij)
 ENDIF
 
 

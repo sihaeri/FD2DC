@@ -477,7 +477,7 @@ END SUBROUTINE fd_calc_wall_nusselt
 SUBROUTINE fd_calc_lwall_nusselt(walnusselt,tw,tref)
 
 USE real_parameters,  ONLY : zero,three,four,one
-USE shared_data,      ONLY : njm,li,dtx,xc,objtp,x,y,t,fx,nj
+USE shared_data,      ONLY : njm,li,dtx,xc,x,y,t,fx,nj
 USE precision,        ONLY : r_single
 
 IMPLICIT NONE
