@@ -44,7 +44,7 @@ REAL(KIND = r_single) :: uin,vin,pin,tin,dx,dy,rp,domain_vol,rdummy
 INTEGER               :: i,j,ij,ncell,idummy,error
 !REAL(KIND = r_single),ALLOCATABLE :: volp(:,:),q(:)
 
-use_GPU = use_GPU_no
+use_GPU = use_GPU_yes
 error = OPSUCCESS
 solver_type = solver_sparsekit
 itim = 0
@@ -156,12 +156,11 @@ NNZ = 2*(njm - 2)*(nim - 1) + 2*(nim - 2)*(njm - 1) + NCel
 IF(solver_type == solver_sparsekit .OR. solver_type == solver_hypre)THEN
   
   CALL fd_alloc_spkit_arrays(alloc_create)
-  CALL fd_cooInd_create()
+  CALL fd_cooInd_create() !--Create coordinate arrays Arow, Acol
 
   IF(use_GPU == use_GPU_yes)THEN
 
-    !CALL fd_cooInd_create() !--Create coordinate arrays Arow, Acol
-    CALL cu_getInstance(error)
+    CALL cu_getInstance()
     IF(error /= OPSUCCESS)GOTO 100
     CALL cu_initDevice(error)
     IF(error /= OPSUCCESS)GOTO 100
