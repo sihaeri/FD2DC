@@ -17,6 +17,7 @@ USE shared_data,        ONLY : objcentx,objcenty,objradius,objbradius,nsurfpoint
                                nusseltpointx,nusseltpointy,calclocalnusselt,nnusseltpoints,&
                                nusseltcentx,nusseltcenty,nusseltds,nusseltnx,nusseltny,nusseltpoint_interp,&
                                nusseltinterpx,nusseltinterpy,nusseltpoint_cvx,nusseltpoint_cvy,objvol,&
+                               surfpointxinit,surfpointyinit,&
                                objcellvertx,objcellverty,objpoint_interpx,objpoint_interpy,objcell_overlap,&
                                problem_name,problem_len,read_fd_geom,dxmean,hypre_A,Hypre_b,Hypre_x,mpi_comm ,nij,&
                                dxmeanmovedtot,objcentxinit,objcentyinit,objcellxinit,dxmeanmoved,&
@@ -28,7 +29,7 @@ USE modfd_tecwrite,     ONLY : fd_tecwrite_sph_s,fd_tecwrite_sph_v
 
 IMPLICIT NONE
 LOGICAL                 :: failed
-INTEGER                 :: i,j,ncell,ii,jj,mini,maxnn,maxnnb,n,maxnobjcell,ip1,ip,jp,is,ie,js,je,error
+INTEGER                 :: i,j,ncell,ii,jj,mini,maxnn,maxnnb,n,maxnobjcell,maxnsurfpoint,ip1,ip,jp,is,ie,js,je,error
 INTEGER,ALLOCATABLE     :: nn(:),nnb(:)
 REAL(KIND = r_single)   :: dtheta,theta,domain_vol,dx,dy,mindist,unitvectx,unitvecty,&
                            dist,posx,posy,rp,vecx,vecy,xp,yp,coeft,dxmeanl,costheta,sintheta,ds
@@ -220,126 +221,7 @@ DO n = 1,nsphere
     ENDDO
   ENDIF
 
-  IF(calcsurfforce)THEN
-    DO i=1,nsurfpoints(n)
-      IF(i < nsurfpoints(n))THEN
-        ip1 = i + 1
-      ELSE
-        ip1 = 1
-      ENDIF
-
-      !--Calc centre points
-      surfcentrex(i,n) = (surfpointx(i,n) + surfpointx(ip1,n))/two
-      surfcentrey(i,n) = (surfpointy(i,n) + surfpointy(ip1,n))/two
-
-      !--Locate the centre point on the Eul grid
-      CALL find_single_point(surfcentrex(i,n), surfcentrey(i,n), surfpoint_cvx(1,i,n),surfpoint_cvy(1,i,n))
-      
-
-      vecx = surfpointx(i,n) - surfpointx(ip1,n)
-      vecy = surfpointy(i,n) - surfpointy(ip1,n)
-       
-      surfds(i,n) = SQRT(vecx**2 + vecy**2)
-      IF(surfds(i,n) < small) THEN
-        PRINT *,'Error - Coordinates co-exits - undefined normal!'
-        PAUSE
-      ENDIF
-      
-      !--Surface element normals (outward)
-      surfnx(i,n) = -vecy/surfds(i,n)
-      surfny(i,n) = vecx/surfds(i,n)
-
-      !--Ensure the calculation is corrent
-      IF((surfcentrex(i,n) - objcentx(n))*surfnx(i,n) + &
-         (surfcentrey(i,n) - objcenty(n))*surfny(i,n) < zero)THEN
-
-         PRINT *,'Error - outward normal not calculated!'
-         PAUSE
-	    ENDIF
-
-    ENDDO
-
-    DO i=1,nsurfpoints(n)
-      
-      coeft = one
-      dxmeanl = ( (x(surfpoint_cvx(1,i,n)) - x(surfpoint_cvx(1,i,n)-1)) + & 
-                  (y(surfpoint_cvy(1,i,n)) - y(surfpoint_cvy(1,i,n)-1))   )/two
-      DO          
-        failed = .FALSE. 
-        !--first interpolation point
-        xp = surfcentrex(i,n) + coeft * surfnx(i,n) * dxmeanl 
-        yp = surfcentrey(i,n) + coeft * surfny(i,n) * dxmeanl 
-
-        !--Locate the point
-        CALL find_single_point(xp,yp,ip,jp)
-        
-        !--indentify the neighbours      
-        IF(xp > xc(ip))THEN
-          is = ip
-          ie = ip + 1
-        ELSE
-          is = ip - 1
-          ie = ip
-        ENDIF
-
-        IF(yp > yc(jp))THEN
-          js = jp
-          je = jp + 1
-        ELSE
-          js = jp - 1
-          je = jp
-        ENDIF
-
-        !--Ensure all neighbours are outside of the object
-        DO ii = is,ie
-          DO jj = js,je
-            IF( ( (xc(ii) - surfcentrex(i,n))*surfnx(i,n) + &
-                  (yc(jj) - surfcentrey(i,n))*surfny(i,n)    ) < zero )THEN
-
-               failed = .TRUE.
-               coeft = coeft + half * dxmeanl
-            ENDIF
-              
-          ENDDO
-        ENDDO
-        IF(.NOT. failed)EXIT
-      ENDDO 
-
-      surfpoint_interp(1:4,1,i,n) = (/is,ie,js,je/)
-      surfpoint_cvx(2,i,n) = ip
-      surfpoint_cvy(2,i,n) = jp
-      surfinterpx(1,i,n) = xp
-      surfinterpy(1,i,n) = yp
-
-      !--second point has 2 times the distance of the first point to the surface centre
-      !--Assuming a convex surface no need to check for the neighbours
-      surfinterpx(2,i,n) = two * surfinterpx(1,i,n) - surfcentrex(i,n) 
-      surfinterpy(2,i,n) = two * surfinterpy(1,i,n) - surfcentrey(i,n)
-    
-      CALL find_single_point(surfinterpx(2,i,n),surfinterpy(2,i,n),ip,jp)
-
-      IF(xp > xc(ip))THEN
-        is = ip
-        ie = ip + 1
-      ELSE
-        is = ip - 1
-        ie = ip
-      ENDIF
-
-      IF(yp > yc(jp))THEN
-        js = jp
-        je = jp + 1
-      ELSE
-        js = jp - 1
-        je = jp
-      ENDIF
-
-      surfpoint_interp(1:4,2,i,n) = (/is,ie,js,je/)
-      surfpoint_cvx(3,i,n) = ip
-      surfpoint_cvy(3,i,n) = jp 
-       
-    ENDDO
-  ENDIF 
+  IF(calcsurfforce)CALL fd_create_interpmol(n)
   
   IF(.NOT. read_fd_geom)THEN  
     DO i=1,nnb(n)+1
@@ -455,15 +337,19 @@ ENDIF
 
 IF(forcedmotion)THEN
   maxnobjcell = MAXVAL(nobjcells(:),1)
+  maxnsurfpoint = MAXVAL(nsurfpoints(:),1)
   ALLOCATE(objcentxinit(nsphere),objcentyinit(nsphere),objcellxinit(maxnobjcell,nsphere),&
            objcellyinit(maxnobjcell,nsphere),objcellvertxinit(4,maxnobjcell,nsphere),&
-           objcellvertyinit(4,maxnobjcell,nsphere))
+           objcellvertyinit(4,maxnobjcell,nsphere),&
+           surfpointxinit(maxnsurfpoint,nsphere),surfpointyinit(maxnsurfpoint,nsphere))
   objcentxinit = objcentx
   objcentyinit = objcenty
   objcellxinit = objcellx
   objcellyinit = objcelly
   objcellvertxinit = objcellvertx
   objcellvertyinit = objcellverty
+  surfpointxinit = surfpointx
+  surfpointyinit = surfpointy
 ENDIF
 
 DEALLOCATE(dummyobjcellx,dummyobjcelly,dummydx,dummydy,dummyposarray)
@@ -527,12 +413,20 @@ DO n = 1,nsphere
       ENDIF
     ENDDO
 
+    IF(i>nim)THEN
+      WRITE(*,*)'Could not find cell,', j,', for particle,', n,', in x-dirextion.'
+    ENDIF
+     
     DO i = 2,njm
       IF(objcelly(j,n) <= y(i) .AND. objcelly(j,n) > y(i-1))THEN
         objpoint_cvy(j,n) = i
         EXIT
       ENDIF
     ENDDO
+    IF(i>njm)THEN
+      WRITE(*,*)'Could not find cell,', j,', for particle,', n,', in y-dirextion.'
+    ENDIF
+
   ENDDO
 
 
@@ -1258,7 +1152,7 @@ USE parameters,       ONLY : subTimeStep
 USE precision,        ONLY : r_single
 USE shared_data,      ONLY : nsphere,nobjcells,objcentmi,objcentxo,objcentyo,objcellx,objcelly,&
                              objcentxo,objcentyo,dt,objcentu,objcentv,objcento,objpoint_interpx,objpoint_interpy,&
-                             objcellvertx,objcellverty,objcentx,objcenty,objcentuo,objcentvo,&
+                             objcellvertx,objcellverty,objcentx,objcenty,objcentuo,objcentvo,calcsurfforce,&
                              objpoint_cvx,objpoint_cvy,nsurfpoints,surfpointx,surfpointy,dxmeanmoved,up,vp,omp,&
                              forcedmotion,lread,Fpq,Fpw,objvol,densitp,x,y,xc,yc,objcellvol,li,fdfcu,fdfcv
 USE real_parameters,  ONLY : zero,three,two,half,one,four
@@ -1286,6 +1180,7 @@ IF(forcedmotion)THEN
     objcentyo(nn) = objcenty(nn) 
     CALL fd_calc_forcedmotion(nn)
     CALL fd_update_forcedvel(nn)
+    IF(calcsurfforce)CALL fd_create_interpmol(nn)
     DO n = 1,nobjcells(nn)
    
       CALL fd_track_single_point(objcellx(n,nn),objcelly(n,nn),objpoint_cvx(n,nn),objpoint_cvy(n,nn),ip,jp,&
@@ -1389,8 +1284,7 @@ ELSE
       objcellverty(:,n,nn) =  objcentyo(nn)*rone + (objcento(3,nn)*rmcxr + objcento(4,nn)*rmcyr) + lindispy*rone
 
     ENDDO
-    !--Only rotate it (normals, centers, interpolation stencil etc... &
-    !--not updated if want to explicitly calculate hyd forces add them)
+   
     DO n=1,nsurfpoints(nn)
 
       rmcx = surfpointx(n,nn) - objcentxo(nn)
@@ -1400,6 +1294,8 @@ ELSE
       surfpointy(n,nn) = objcentyo(nn) + (objcento(3,nn)*rmcx + objcento(4,nn)*rmcy) + lindispy
 
     ENDDO
+
+    IF(calcsurfforce)CALL fd_create_interpmol(nn)
 
     WRITE(*,*)moved, ' Particles moved in this time step for sphere, ', nn
 
@@ -1870,35 +1766,55 @@ SUBROUTINE fd_calc_forcedmotion(n)
 USE precision,              ONLY : r_single
 USE real_parameters,        ONLY : pi,fifth,five,two,zero,six,ten,one
 USE shared_data,            ONLY : up,vp,omp,nsurfpoints,nobjcells,&
-                                   objcentx,surfpointx,objradius,time,&
+                                   objcentx,surfpointx,objcenty,surfpointy,objradius,time,&
                                    objcentxinit,surfpointxinit,objcellx,objcellxinit,&
-                                   objcellvertxinit,objcellvertx
+                                   objcellvertxinit,objcellvertx,&
+                                   objcentyinit,surfpointyinit,objcelly,objcellyinit,&
+                                   objcellvertyinit,objcellverty
 
 IMPLICIT NONE
 
 INTEGER,INTENT(IN)    :: n
 INTEGER               :: j
 
-REAL(KIND = r_single) :: omega,amp,freq,KC,dx,starttime,t,freq0,freqfact
+REAL(KIND = r_single) :: omega,amp,freq,KC,dx,starttime,t,freq0,freqfact,dy
 
 !--horizontal motion in stationary fluid
-freq = fifth
-KC   = five
+starttime = fifth
+freq0 = 0.95_r_single; freqfact = 1.1_r_single
+freq = freq0 * freqfact
+amp = 0.4_r_single * objradius(n)
 omega = two*pi*freq
-amp = objradius(n) * KC / pi
-
-dx = amp*SIN(omega * time)
- 
-objcentx(n) = objcentxinit(n) - dx
-
+t = time - starttime
+IF(t < zero) t = zero 
+dy = amp*SIN(omega * t)
+objcenty(n) = objcentyinit(n) - dy
 DO j=1,nobjcells(n) 
-  objcellx(j,n) = objcellxinit(j,n) - dx
-  objcellvertx(:,j,n) = objcellvertxinit(:,j,n) - dx
+  objcelly(j,n) = objcellyinit(j,n) - dy
+  objcellverty(:,j,n) = objcellvertyinit(:,j,n) - dy
 ENDDO
 
 DO j=1,nsurfpoints(n) 
-  surfpointx(j,n) = surfpointxinit(j,n) - dx
+  surfpointy(j,n) = surfpointyinit(j,n) - dy
 ENDDO 
+
+!freq = fifth
+!KC   = five
+!omega = two*pi*freq
+!amp = objradius(n) * KC / pi
+!
+!dx = amp*SIN(omega * time)
+! 
+!objcentx(n) = objcentxinit(n) - dx
+!
+!DO j=1,nobjcells(n) 
+!  objcellx(j,n) = objcellxinit(j,n) - dx
+!  objcellvertx(:,j,n) = objcellvertxinit(:,j,n) - dx
+!ENDDO
+!
+!DO j=1,nsurfpoints(n) 
+!  surfpointx(j,n) = surfpointxinit(j,n) - dx
+!ENDDO 
 
 END SUBROUTINE fd_calc_forcedmotion
 
@@ -2231,7 +2147,7 @@ SUBROUTINE fd_calc_part_collision
 !--A naive collision strategy, Only for O(10^3) spherical particles  
 
 USE shared_data,      ONLY : nsphere,objcentx,objcenty,Fpq,Fpw,gravx,gravy,x,y,objradius
-USE real_parameters,  ONLY : zero,two,epsilonP,five,ten
+USE real_parameters,  ONLY : zero,two,epsilonP,five,ten,four,real_1e2,real_1e3
 USE precision,        ONLY : r_single
 
 IMPLICIT NONE
@@ -2248,7 +2164,7 @@ g = SQRT(gravx**2+gravy**2)
 DO p = 1,nsphere
   DO q = 1,nsphere
     IF(p /= q)THEN
-      Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q),p,q,five/two*epsilonP)
+      Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q),p,q,ten*epsilonP)
     ENDIF
   ENDDO
 ENDDO
@@ -2261,13 +2177,13 @@ maxy = MAXVAL(y,1)
 !--Particle-wall collision, (Mirror image)
 DO p = 1,nsphere 
   !--e wall
-  Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p,two*ten*epsilonP)
+  Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p,real_1e2*epsilonP)
   !--w wall
-  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p,two*ten*epsilonP)
+  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p,real_1e2*epsilonP)
   !--n wall
-  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p,two*ten*epsilonP)
+  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p,real_1e2*epsilonP)
   !--s wall
-  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p,two*ten*epsilonP)
+  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p,real_1e2*epsilonP)
 ENDDO
 
 END SUBROUTINE fd_calc_part_collision
@@ -2331,5 +2247,144 @@ DO mm = 1,nsphere
 ENDDO
 
 END SUBROUTINE fd_find_overlap
+
+SUBROUTINE fd_create_interpmol(n)
+  
+USE real_parameters,ONLY : one,two,small,half,zero
+USE precision,      ONLY : r_single
+USE shared_data,    ONLY : nfilpoints,surfpointx,surfpointy,objcentx,objcenty,&
+                               surfds,surfnx,surfny,surfcentrex,surfcentrey,&
+                               xc,yc,surfpoint_cvx,surfpoint_cvy,&
+                               surfpoint_interp,surfinterpx,surfinterpy,xc,yc,x,y,nsphere,&
+                               nsurfpoints,objradius,nsphere
+
+IMPLICIT NONE
+INTEGER,INTENT(IN) :: n
+INTEGER            :: ip1
+REAL(KIND = r_single) :: vecx,vecy,coeft,dxmeanl,xp,yp
+LOGICAL               :: failed
+INTEGER               :: i,ip,jp,is,ie,js,je,ii,jj
+
+
+DO i=1,nsurfpoints(n)
+  IF(i < nsurfpoints(n))THEN
+    ip1 = i + 1
+  ELSE
+    ip1 = 1
+  ENDIF
+
+  !--Calc centre points
+  surfcentrex(i,n) = (surfpointx(i,n) + surfpointx(ip1,n))/two
+  surfcentrey(i,n) = (surfpointy(i,n) + surfpointy(ip1,n))/two
+
+  !--Locate the centre point on the Eul grid
+  CALL find_single_point(surfcentrex(i,n), surfcentrey(i,n), surfpoint_cvx(1,i,n),surfpoint_cvy(1,i,n))
+
+
+  vecx = surfpointx(i,n) - surfpointx(ip1,n)
+  vecy = surfpointy(i,n) - surfpointy(ip1,n)
+
+  surfds(i,n) = SQRT(vecx**2 + vecy**2)
+  IF(surfds(i,n) < small) THEN
+    PRINT *,'Error - Coordinates co-exits - undefined normal!'
+    PAUSE
+  ENDIF
+
+  !--Surface element normals (outward)
+  surfnx(i,n) = -vecy/surfds(i,n)
+  surfny(i,n) = vecx/surfds(i,n)
+
+  !--Ensure the calculation is corrent
+  IF((surfcentrex(i,n) - objcentx(n))*surfnx(i,n) + &
+    (surfcentrey(i,n) - objcenty(n))*surfny(i,n) < zero)THEN
+
+    PRINT *,'Error - outward normal not calculated!'
+    PAUSE
+  ENDIF
+
+ENDDO
+
+DO i=1,nsurfpoints(n)
+
+  coeft = one
+  dxmeanl = ( (x(surfpoint_cvx(1,i,n)) - x(surfpoint_cvx(1,i,n)-1)) + &
+              (y(surfpoint_cvy(1,i,n)) - y(surfpoint_cvy(1,i,n)-1)) )/two
+  DO
+    failed = .FALSE.
+    !--first interpolation point
+    xp = surfcentrex(i,n) + coeft * surfnx(i,n) * dxmeanl
+    yp = surfcentrey(i,n) + coeft * surfny(i,n) * dxmeanl
+
+    !--Locate the point
+    CALL find_single_point(xp,yp,ip,jp)
+
+    !--indentify the neighbours
+    IF(xp > xc(ip))THEN
+      is = ip
+      ie = ip + 1
+    ELSE
+      is = ip - 1
+      ie = ip
+    ENDIF
+
+    IF(yp > yc(jp))THEN
+      js = jp
+      je = jp + 1
+    ELSE
+      js = jp - 1
+      je = jp
+    ENDIF
+
+    !--Ensure all neighbours are outside of the object
+    DO ii = is,ie
+      DO jj = js,je
+        IF( ( (xc(ii) - surfcentrex(i,n))*surfnx(i,n) + &
+          (yc(jj) - surfcentrey(i,n))*surfny(i,n) ) < zero )THEN
+
+          failed = .TRUE.
+          coeft = coeft + half * dxmeanl
+        ENDIF
+
+      ENDDO
+    ENDDO
+    IF(.NOT. failed)EXIT
+  ENDDO
+
+  surfpoint_interp(1:4,1,i,n) = (/is,ie,js,je/)
+  surfpoint_cvx(2,i,n) = ip
+  surfpoint_cvy(2,i,n) = jp
+  surfinterpx(1,i,n) = xp
+  surfinterpy(1,i,n) = yp
+
+  !--second point has 2 times the distance of the first point to the surface centre
+  !--Assuming a convex surface no need to check for the neighbours
+  surfinterpx(2,i,n) = two * surfinterpx(1,i,n) - surfcentrex(i,n)
+  surfinterpy(2,i,n) = two * surfinterpy(1,i,n) - surfcentrey(i,n)
+
+  CALL find_single_point(surfinterpx(2,i,n),surfinterpy(2,i,n),ip,jp)
+
+  IF(xp > xc(ip))THEN
+    is = ip
+    ie = ip + 1
+  ELSE
+    is = ip - 1
+    ie = ip
+  ENDIF
+
+  IF(yp > yc(jp))THEN
+    js = jp
+    je = jp + 1
+  ELSE
+    js = jp - 1
+    je = jp
+  ENDIF
+
+  surfpoint_interp(1:4,2,i,n) = (/is,ie,js,je/)
+  surfpoint_cvx(3,i,n) = ip
+  surfpoint_cvy(3,i,n) = jp
+
+ENDDO
+
+END SUBROUTINE fd_create_interpmol
 
 ENDMODULE modfd_create_geom

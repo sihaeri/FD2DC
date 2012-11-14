@@ -36,3 +36,12 @@ public:
 	int cuBlas_biCGSTAB_shutdown();
 };
 
+//class cuCalc_sources
+//{
+//	int nsphere;
+//	int nij;
+//	int *nObjectCells; 
+//	int *ObjInterpXi,*ObjInterpXe,*ObjInterpYi,*ObjInterpXe;
+//	int LDA;	//leading edge dimension, i.e MAX(nObjectCells) 
+//	double *objectRU, *objectRV, *objectRT, *objecFX, *objecFY, *objecQ, *objecTp;
+//	double *X, *Y, *Xc, *Yc;

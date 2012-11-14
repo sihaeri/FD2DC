@@ -16,6 +16,7 @@ USE shared_data,            ONLY : solver_type,NNZ,NCel,lli,itim,time,lread,lwri
                                    densit,visc,gravx,gravy,beta,tref,problem_name,problem_len,lamvisc,&
                                    ulid,tper,itst,nprt,dt,gamt,iu,iv,ip,ien,dtr,tper,f1,f2,ft1,ft2,voo,uoo,too,&
                                    nsw,lcal,sor,resor,urf,gds,om,cpf,kappaf,nim,njm,ni,nj,calcwalnusselt,&
+                                   calcwalnusselt_ave,naverage_wsteps,&
                                    li,x,y,xc,yc,fx,fy,laxis,r,nij,u,v,nsw,sor,lcal,p,t,th,tc,den,deno,dxmean,&
                                    vo,uo,to,title,duct,flomas,flomom,f1,ft1,stationary,celbeta,celkappa,celcp,&  !--FD aspect
                                    objcentx,objcenty,objradius,putobj,nsurfpoints,read_fd_geom,&
@@ -44,7 +45,7 @@ REAL(KIND = r_single) :: uin,vin,pin,tin,dx,dy,rp,domain_vol,rdummy
 INTEGER               :: i,j,ij,ncell,idummy,error
 !REAL(KIND = r_single),ALLOCATABLE :: volp(:,:),q(:)
 
-use_GPU = use_GPU_yes
+use_GPU = use_GPU_no
 error = OPSUCCESS
 solver_type = solver_sparsekit
 itim = 0
@@ -69,6 +70,7 @@ READ(set_unit,*)(gds(i),i=1,nphi)
 READ(set_unit,*)temp_visc
 IF(temp_visc)READ(set_unit,*)viscgamma
 READ(set_unit,*)calcwalnusselt
+IF(calcwalnusselt)READ(set_unit,*)calcwalnusselt_ave,naverage_wsteps
 READ(set_unit,*)putobj,read_fd_geom,stationary,forcedmotion,movingmesh,calcsurfforce,calclocalnusselt,isotherm
 IF(calclocalnusselt)READ(set_unit,*)calclocalnusselt_ave,naverage_steps
 IF(putobj)THEN
@@ -243,7 +245,6 @@ ENDIF
 !---------------------------------------------------
 !--BOUNDARY AND INITIAL CONDITIONS
 !---------------------------------------------------
-
 !--Allocate working arrays (matrix diagnals, sources etc...)
 CALl fd_alloc_work_arrays(alloc_create)
 
@@ -328,12 +329,16 @@ ELSE
          (celcp(ij),ij=1,nij),(celkappa(ij),ij=1,nij)
   CLOSE(init_field_unit)
 ENDIF
+
 IF(putobj)THEN
   IF(nsphere > 0)  CALL fd_calc_physprops
   deno = den
 ENDIF
 
 CALL fd_print_problem_setup
+
+!OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//'_init.plt',STATUS='NEW')
+!CALL fd_tecwrite_eul(plt_unit)
 
 !ALLOCATE(volp(nij,nsphere),q(nsphere))
 !
@@ -943,26 +948,12 @@ INTEGER,INTENT(IN)      :: create_or_destroy,max_point
 INTEGER                 :: ierror
 
 IF(create_or_destroy == alloc_create)THEN
-  IF(.NOT.forcedmotion)THEN
     ALLOCATE(surfpointx(max_point,nsphere),surfpointy(max_point,nsphere),STAT=ierror)
     IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate onject arrays.'
     surfpointx = zero
     surfpointy = zero
-  ELSE
-    ALLOCATE(surfpointx(max_point,nsphere),surfpointy(max_point,nsphere),&
-             surfpointxinit(max_point,nsphere),surfpointyinit(max_point,nsphere),STAT=ierror)
-    IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate onject arrays.'
-    surfpointx = zero
-    surfpointy = zero
-    surfpointxinit = zero
-    surfpointyinit = zero
-  ENDIF
 ELSEIF(create_or_destroy == alloc_destroy)THEN
-  IF(.NOT.forcedmotion)THEN
     DEALLOCATE(surfpointx,surfpointy)
-  ELSE
-    DEALLOCATE(surfpointxinit,surfpointyinit)
-  ENDIF
 ENDIF
 
 END SUBROUTINE fd_alloc_objgeom_arrays

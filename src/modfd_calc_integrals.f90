@@ -2,7 +2,7 @@ MODULE modfd_calc_integrals
 
 PRIVATE
 PUBLIC :: fd_calc_integrals,fd_calc_surf_force,fd_calc_surf_nusselt,fd_calc_wall_nusselt,&
-          fd_calc_lwall_nusselt,fd_calc_surf_nusselt_ave
+          fd_calc_lwall_nusselt,fd_calc_surf_nusselt_ave,fd_calc_lwall_nusselt_ave
 CONTAINS
 !===============================================
 SUBROUTINE fd_calc_integrals
@@ -500,5 +500,35 @@ DO j = 2,njm
 ENDDO
 
 END SUBROUTINE fd_calc_lwall_nusselt
+
+SUBROUTINE fd_calc_lwall_nusselt_ave(walnusselt,ncalled,tw,tref)
+
+USE real_parameters,  ONLY : zero,three,four,one
+USE shared_data,      ONLY : njm,li,dtx,xc,x,y,t,fx,nj
+USE precision,        ONLY : r_single
+
+IMPLICIT NONE
+
+REAL(KIND = r_single),INTENT(INOUT) :: walnusselt(nj)
+REAL(KIND = r_single),INTENT(IN)    :: tw,tref
+INTEGER,INTENT(INOUT)               :: ncalled
+
+INTEGER               :: j,ij
+REAL(KIND = r_single) :: dx,dtdx,tf
+INTEGER,SAVE          :: n_entered = 0
+
+n_entered = n_entered + 1
+
+DO j = 2,njm
+  ij = li(2) + j
+  tf=t(ij+nj)*fx(2)+t(ij)*(one-fx(2))
+  dx=x(2)-x(1) 
+  dtdx = -(three * tw - four * t(2) + tf)/dx
+  walnusselt(j) = walnusselt(j) + (y(njm) - y(1))/(tw - tref) * dtdx
+ENDDO
+
+ncalled = n_entered
+
+END SUBROUTINE fd_calc_lwall_nusselt_ave
 
 END MODULE modfd_calc_integrals

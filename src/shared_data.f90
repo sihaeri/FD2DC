@@ -7,7 +7,7 @@ INTEGER     :: solver_type
 INTEGER     :: use_GPU
 LOGICAL     :: temp_visc !--Set to true in the problem setup for temperature dependant viscosity
 !-------------------------Part-1: INTEGERS-----------------------------------------!
-!-- ni, nj: number of grid points in x, y direction respectively (boundary included)
+!-- ni, nj: number of grid points in x, y direction respectively (including boundaries)
 !-- nim, njm: last live cell in x, y direction
 !-- nij: ni*nj
 !-- li: conversion array from 2D to 1D
@@ -166,11 +166,13 @@ LOGICAL                       :: duct !--if true inlet outlet boundary
 !--isotherm:   set to false if particle has source term (variable temp), If true objqp should be set and objtp is the initial temp
 !--ibsu,ibsv: momentum sources similar to fdsu,fdsv
 !--naverage_steps: number of time steps to be included in time averaging (it is done on the last naverage_steps steps)
+!--naverage_wsteps: number of time steps to be included in time averaging (it is done on the last naverage_wsteps steps) for wall nusselt numbers
 !--calcwalnusselt: calculate the local nusselt number on the left wall.
+!--calcwalnusselt_ave: calculate the local nusselt number on the left wall (with time averaging)
 REAL(KIND = r_single),ALLOCATABLE,DIMENSION(:)     :: ibsu,ibsv
-INTEGER                       :: nsphere,nfil,filnprt,sphnprt,naverage_steps
+INTEGER                       :: nsphere,nfil,filnprt,sphnprt,naverage_steps,naverage_wsteps
 LOGICAL                       :: putobj,calcsurfforce,calclocalnusselt,read_fd_geom,stationary,movingmesh,&
-                                 forcedmotion,isotherm,calclocalnusselt_ave,calcwalnusselt
+                                 forcedmotion,isotherm,calclocalnusselt_ave,calcwalnusselt,calcwalnusselt_ave
 REAL(KIND = r_single)         :: fd_urf,filgravx,filgravy,filfr,filalpha,filbeta,filgamma
 REAL(KIND = r_single)         :: dxmean,dxmeanmoved,dxmeanmovedtot
 
