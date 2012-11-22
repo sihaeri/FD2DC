@@ -16,7 +16,7 @@ USE shared_data,            ONLY : solver_type,NNZ,NCel,lli,itim,time,lread,lwri
                                    densit,visc,gravx,gravy,beta,tref,problem_name,problem_len,lamvisc,&
                                    ulid,tper,itst,nprt,dt,gamt,iu,iv,ip,ien,dtr,tper,f1,f2,ft1,ft2,voo,uoo,too,&
                                    nsw,lcal,sor,resor,urf,gds,om,cpf,kappaf,nim,njm,ni,nj,calcwalnusselt,&
-                                   calcwalnusselt_ave,naverage_wsteps,&
+                                   calcwalnusselt_ave,naverage_wsteps,xPeriodic,yPeriodic,Ldomainx,Ldomainy,&
                                    li,x,y,xc,yc,fx,fy,laxis,r,nij,u,v,nsw,sor,lcal,p,t,th,tc,den,deno,dxmean,&
                                    vo,uo,to,title,duct,flomas,flomom,f1,ft1,stationary,celbeta,celkappa,celcp,&  !--FD aspect
                                    objcentx,objcenty,objradius,putobj,nsurfpoints,read_fd_geom,&
@@ -51,10 +51,22 @@ solver_type = solver_sparsekit
 itim = 0
 time = zero
 naverage_steps = 0
-
+ 
 CALL fd_alloc_solctrl_arrays(alloc_create)
 
 READ(set_unit,6)title
+READ(set_unit,*)xPeriodic,yPeriodic
+
+IF((xPeriodic /= 0 .AND. xPeriodic /= 1) .OR. (yPeriodic /= 0 .AND. yPeriodic /= 1))THEN
+  WRITE(*,*)'Periodic boundary controller variables should be 0 or 1.'
+  STOP
+ENDIF
+
+IF((xPeriodic == 1 .OR. yPeriodic == 1) .AND. solver_type /= solver_sparsekit)THEN 
+  WRITE(*,*)'Periodic boundary controller only works with BiCGSTAB Solve set solver_type = solver_sparsekit.'
+  STOP
+ENDIF
+
 READ(set_unit,*)lread,initFromFile,lwrite,ltest,laxis,louts,loute,ltime,duct
 READ(set_unit,*)maxit,minit,imon,jmon,ipr,jpr,sormax,slarge,alfa
 READ(set_unit,*)densit,visc,cpf,kappaf,gravx,gravy,beta,th,tc,tref
@@ -154,7 +166,7 @@ DO i=2,nim
   ENDDO
 ENDDO
 
-NNZ = 2*(njm - 2)*(nim - 1) + 2*(nim - 2)*(njm - 1) + NCel
+NNZ = 2*(njm - 2 + yPeriodic)*(nim - 1) + 2*(nim - 2 + xPeriodic)*(njm - 1) + NCel
 IF(solver_type == solver_sparsekit .OR. solver_type == solver_hypre)THEN
   
   CALL fd_alloc_spkit_arrays(alloc_create)
@@ -188,14 +200,19 @@ ENDIF
 DO i=2,nim
   xc(i)=half*(x(i)+x(i-1))
 END DO
-xc(1)=x(1)
-xc(ni)=x(nim)
+
+xc(1)=x(1) - xPeriodic*(x(nim) - xc(nim))
+xc(ni)=x(nim) + xPeriodic*(xc(2) - x(1))
 
 DO j=2,njm
   yc(j)=half*(y(j)+y(j-1))
 END DO
-yc(1)=y(1)
-yc(nj)=y(njm)
+
+yc(1)=y(1) - yPeriodic*(y(njm) - yc(njm))
+yc(nj)=y(njm) + yPeriodic*(yc(2) - y(1))
+
+Ldomainx = x(nim) - x(1)
+Ldomainy = y(njm) - y(1)
 
 !--interpolation factors
 DO i=1,nim
@@ -337,9 +354,9 @@ ENDIF
 
 CALL fd_print_problem_setup
 
-!OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//'_init.plt',STATUS='NEW')
-!CALL fd_tecwrite_eul(plt_unit)
-
+OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//'_init.plt',STATUS='NEW')
+CALL fd_tecwrite_eul(plt_unit)
+CLOSE(plt_unit)
 !ALLOCATE(volp(nij,nsphere),q(nsphere))
 !
 !volp = zero
@@ -850,7 +867,7 @@ USE shared_data,      ONLY : nsphere,objtp,objqp,fd_urf,densitp,objcentx,objcent
                              nobjcells,mcellpercv,nnusseltpoints,objcentmi,objvol,&
                              objcento,objcentxo,objcentyo,objcentvo,objcentuo,objcentomo,&
                              betap,up,vp,omp,forcedmotion,stationary,isotherm,objbradius,cpp,kappap,&
-                             Fpq,Fpw
+                             Fpq,Fpw,zobjcentx,zobjcenty,zobjcentxo,zobjcentyo
 USE real_parameters,  ONLY : zero
 
 IMPLICIT NONE
@@ -865,7 +882,8 @@ IF(create_or_destroy == alloc_create)THEN
           objcentmi(nsphere),objvol(nsphere),objcento(4,nsphere),&
           objcentxo(nsphere),objcentyo(nsphere),objcentvo(nsphere),objcentuo(nsphere),&
           objcentomo(nsphere),betap(nsphere),objbradius(nsphere),cpp(nsphere),kappap(nsphere),&
-          Fpq(2,nsphere),Fpw(2,nsphere),STAT=ierror)
+          Fpq(2,nsphere),Fpw(2,nsphere),zobjcentx(nsphere),zobjcenty(nsphere),&
+          zobjcentxo(nsphere),zobjcentyo(nsphere),STAT=ierror)
   IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate onject arrays.'
   IF(forcedmotion .OR. stationary)THEN
     ALLOCATE(up(nsphere),vp(nsphere),omp(nsphere))
@@ -882,11 +900,11 @@ IF(create_or_destroy == alloc_create)THEN
   objcento = zero;objcentxo = zero ;objcentyo = zero
   objcentvo = zero;objcentuo = zero;objcentomo = zero;betap = zero
   objbradius = zero;cpp = zero;kappap = zero
-  Fpq = zero; Fpw = zero
+  Fpq = zero; Fpw = zero; zobjcentx = 0; zobjcenty = 0; zobjcentxo = 0; zobjcentyo = 0
 ELSEIF(create_or_destroy == alloc_destroy)THEN
   DEALLOCATE(objtp,densitp,objcentx,objcenty,objradius,objcentu,objcentv,objcentom,nsurfpoints,nobjcells,&
              mcellpercv,objcentmi,objvol,objcento,objcentxo,objcentyo,objcentvo,objcentuo,objcentomo,betap,&
-             objbradius,cpp,kappap,Fpq,Fpw)
+             objbradius,cpp,kappap,Fpq,Fpw,zobjcentx,zobjcenty,zobjcentxo,zobjcentyo)
   IF(forcedmotion .OR. stationary)DEALLOCATE(up,vp,omp)
   IF(.NOT. isotherm)DEALLOCATE(objqp)
 ENDIF
@@ -939,7 +957,8 @@ SUBROUTINE fd_alloc_objgeom_arrays(create_or_destroy,max_point)
 
 USE parameters,       ONLY : alloc_create,alloc_destroy,out_unit
 USE shared_data,      ONLY : surfpointx,surfpointy,nsurfpoints,nsphere,&
-                             surfpointxinit,surfpointyinit,forcedmotion
+                             surfpointxinit,surfpointyinit,forcedmotion,&
+                             zsurfpointx,zsurfpointy
 USE real_parameters,  ONLY : zero
 
 IMPLICIT NONE
@@ -948,12 +967,15 @@ INTEGER,INTENT(IN)      :: create_or_destroy,max_point
 INTEGER                 :: ierror
 
 IF(create_or_destroy == alloc_create)THEN
-    ALLOCATE(surfpointx(max_point,nsphere),surfpointy(max_point,nsphere),STAT=ierror)
+    ALLOCATE(surfpointx(max_point,nsphere),surfpointy(max_point,nsphere),&
+             zsurfpointx(max_point,nsphere),zsurfpointy(max_point,nsphere),STAT=ierror)
     IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate onject arrays.'
     surfpointx = zero
     surfpointy = zero
+    zsurfpointx = 0
+    zsurfpointy = 0
 ELSEIF(create_or_destroy == alloc_destroy)THEN
-    DEALLOCATE(surfpointx,surfpointy)
+    DEALLOCATE(surfpointx,surfpointy,zsurfpointx,zsurfpointy)
 ENDIF
 
 END SUBROUTINE fd_alloc_objgeom_arrays

@@ -24,7 +24,7 @@ USE shared_data,        ONLY : urf,iu,iv,p,su,sv,apu,apv,nim,njm,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
                                Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celbeta,&
-                               fdfcu,fdfcv,use_GPU
+                               fdfcu,fdfcv,use_GPU,xPeriodic,yPeriodic
 USE modfd_set_bc,       ONLY : fd_bcpressure,fd_bcuv,fd_calc_bcuv_grad
 USE precision,          ONLY : r_single
 USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual,fd_cooVal_create
@@ -36,7 +36,7 @@ REAL(KIND = r_single) :: urfu,urfv,fxe,fxp,dxpe,s,d,cp,ce,&
                          fuuds,fvuds,fucds,fvcds,fyn,fyp,dypn,&
                          dx,dy,rp,vol,sb,pe,pw,pn,ps,apt,cn,&
                          vele,velw,veln,vels,due,dve,dun,dvn,visi
-INTEGER               :: ij,i,j,ije,ijn,ipar(16),debug,error
+INTEGER               :: ij,i,j,ije,ijn,ijs,ijw,ipar(16),debug,error,xend,yend
 REAL                  :: fpar(16)
 
 debug = 0
@@ -67,7 +67,8 @@ apv=zero
 !--P and E are calculated; contributions to AP(P) and 
 !--AP(E) come through the sum of neighbor coefficients
 !--and are not explicitly calculated.
-DO i=2,nim-1
+xend = nim+xPeriodic-1 !--Apply periodic conditions
+DO i=2,xend
 
 !--INTERPOLATION FACTORS, DISTANCE FROM P TO E (SAME FOR ALL J)
   fxe =fx(i)
@@ -76,7 +77,7 @@ DO i=2,nim-1
 
   DO j=2,njm
     ij=li(i)+j
-    ije=ij+nj
+    ije=ij+nj-i/nim*((i-1)*nj)
 
     !--CELL FACE AREA S = DY*RE*1
 
@@ -129,8 +130,8 @@ END DO
 !--P and N are calculated; contributions to AP(P) and 
 !--AP(N) come through the sum of neighbor coefficients
 !--and are not explicitly calculated.
-
-DO j=2,njm-1
+yend = njm+yPeriodic-1 !--Apply periodic conditions
+DO j=2,yend
 
 !--INTERPOLATION FACTORS, DISTANCE FROM P TO N (SAME FOR ALL J)
   fyn =fy(j)
@@ -139,8 +140,7 @@ DO j=2,njm-1
 
   DO i=2,nim
     ij =li(i)+j
-    ijn=ij+1
-
+    ijn=ij+1-j/njm*(j-1)
     !--CELL FACE AREA S = DX*RN*1
     s=(x(i)-x(i-1))*r(j)
     !--COEFFICIENT RESULTING FROM DIFFUSIVE FLUX (SAME FOR U AND V)
@@ -198,12 +198,17 @@ DO i=2,nim
     rp=half*(r(j)+r(j-1))
     vol=dx*dy*rp
     ij=li(i)+j
+    ije=ij+nj-xPeriodic*i/nim*((i-1)*nj)
+    ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
+    ijn=ij+1-yPeriodic*j/njm*(j-1)
+    ijs=ij-1+yPeriodic*Max(3-j,0)*(njm-1)
+    
     !--CELL-FACE PRESSURE, CELL-CENTER GRADIENT, SOURCE 
     
-    pe=p(ij+nj)*fx(i)+p(ij)*(one-fx(i))
-    pw=p(ij)*fx(i-1)+p(ij-nj)*(one-fx(i-1))
-    pn=p(ij+1)*fy(j)+p(ij)*(one-fy(j))
-    ps=p(ij)*fy(j-1)+p(ij-1)*(one-fy(j-1))
+    pe=p(ije)*fx(i)+p(ij)*(one-fx(i))
+    pw=p(ij)*fx(i-1)+p(ijw)*(one-fx(i-1))
+    pn=p(ijn)*fy(j)+p(ij)*(one-fy(j))
+    ps=p(ij)*fy(j-1)+p(ijs)*(one-fy(j-1))
     dpx(ij)=(pe-pw)/dx
     dpy(ij)=(pn-ps)/dy
     su(ij)=su(ij)-dpx(ij)*vol
@@ -412,19 +417,23 @@ DO i=2,nim
   DO j=2,njm
     dy=y(j)-y(j-1)
     ij=li(i)+j
+    ije=ij+nj-xPeriodic*i/nim*((i-1)*nj)
+    ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
+    ijn=ij+1-yPeriodic*j/njm*(j-1)
+    ijs=ij-1+yPeriodic*Max(3-j,0)*(njm-1)
     !--CELL-CENTER GRADIENT 
     
-    vele=u(ij+nj)*fx(i)+u(ij)*(one-fx(i))
-    velw=u(ij)*fx(i-1)+u(ij-nj)*(one-fx(i-1))
-    veln=u(ij+1)*fy(j)+u(ij)*(one-fy(j))
-    vels=u(ij)*fy(j-1)+u(ij-1)*(one-fy(j-1))
+    vele=u(ije)*fx(i)+u(ij)*(one-fx(i))
+    velw=u(ij)*fx(i-1)+u(ijw)*(one-fx(i-1))
+    veln=u(ijn)*fy(j)+u(ij)*(one-fy(j))
+    vels=u(ij)*fy(j-1)+u(ijs)*(one-fy(j-1))
     dux(ij)=(vele-velw)/dx
     duy(ij)=(veln-vels)/dy
 
-    vele=v(ij+nj)*fx(i)+v(ij)*(one-fx(i))
-    velw=v(ij)*fx(i-1)+v(ij-nj)*(one-fx(i-1))
-    veln=v(ij+1)*fy(j)+v(ij)*(one-fy(j))
-    vels=v(ij)*fy(j-1)+v(ij-1)*(one-fy(j-1))
+    vele=v(ije)*fx(i)+v(ij)*(one-fx(i))
+    velw=v(ij)*fx(i-1)+v(ijw)*(one-fx(i-1))
+    veln=v(ijn)*fy(j)+v(ij)*(one-fy(j))
+    vels=v(ij)*fy(j-1)+v(ijs)*(one-fy(j-1))
     dvx(ij)=(vele-velw)/dx
     dvy(ij)=(veln-vels)/dy
 

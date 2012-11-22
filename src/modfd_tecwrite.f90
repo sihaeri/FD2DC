@@ -140,50 +140,95 @@ CLOSE(tec_unit)
 
 END SUBROUTINE fd_tecwrite_fil
 
-SUBROUTINE fd_tecwrite_sph_v(tec_unit,nsphere,nobjcells,vertx,verty)
+SUBROUTINE fd_tecwrite_sph_v(tec_unit,nsphere,nobjcells,vertx,verty,zcellx,zcelly,zvertx,zverty)
 
 USE precision,      ONLY : r_single
-USE shared_data,    ONLY : title
+USE shared_data,    ONLY : title,LDomainx,LDomainy
 
 IMPLICIT NONE
 
 INTEGER,INTENT(IN)  :: tec_unit,nsphere
 INTEGER,INTENT(IN),DIMENSION(:)   :: nobjcells
 REAL(KIND = r_single),INTENT(IN),DIMENSION(:,:,:) :: vertx,verty
-INTEGER :: j,n,totp,snp
-    
+INTEGER,INTENT(IN),DIMENSION(:,:)   :: zcellx,zcelly
+INTEGER,INTENT(IN),DIMENSION(:,:,:) :: zvertx,zverty
+
+!--Locals
+REAL(KIND = r_single) :: xx,yy
+INTEGER :: j,n,nspzone(4,nsphere),czonex,czoney,nz,jj
+INTEGER,ALLOCATABLE,SAVE :: spzone(:,:,:)
+LOGICAL,SAVE             :: entered = .FALSE.
+
+IF(.NOT.entered)THEN
+  ALLOCATE(spzone(4,MAXVAL(nobjcells(1:nsphere)),nsphere))
+  entered = .TRUE.
+ENDIF
+
+spzone = 0
+nspzone = 0
+
+DO n = 1,nsphere
+  czonex = zcellx(1,n)
+  czoney = zcelly(1,n)
+  DO j = 1,nobjcells(n)
+    IF(zcellx(j,n) /= czonex .AND. zcelly(j,n) /= czoney)THEN !--Crossed edge
+      nspzone(4,n) = nspzone(4,n) + 1
+      spzone(4,nspzone(4,n),n) = j
+    ELSEIF(zcellx(j,n) /= czonex .AND. zcelly(j,n) == czoney)THEN !--Crossed e-w boundary but no edge
+      nspzone(3,n) = nspzone(3,n) + 1
+      spzone(3,nspzone(3,n),n) = j
+    ELSEIF(zcellx(j,n) == czonex .AND. zcelly(j,n) /= czoney)THEN !--Crossed n-s boundary but no edge 
+      nspzone(2,n) = nspzone(2,n) + 1
+      spzone(2,nspzone(2,n),n) = j
+    ELSE
+      nspzone(1,n) = nspzone(1,n) + 1
+      spzone(1,nspzone(1,n),n) = j
+    ENDIF         
+  ENDDO
+ENDDO
+ 
 WRITE(tec_unit,'(A)')'TITLE="'//TRIM(title)//'"'
 WRITE(tec_unit,9012)
-WRITE(tec_unit,*)'ZONE T=Test,DATAPACKING=POINT,NODES=',4*SUM(nobjcells(1:nsphere)),&
-             ',ELEMENTS=',SUM(nobjcells(1:nsphere)),',ZONETYPE=FEQUADRILATERAL,'
 
 DO n = 1,nsphere
-      
-  DO j=1,nobjcells(n)
-    WRITE(tec_unit,9015)vertx(1,j,n),verty(1,j,n)
-  ENDDO
+  DO nz = 1,4
+    IF(nspzone(nz,n) /= 0)THEN  
+      WRITE(tec_unit,*)'ZONE T=Test,DATAPACKING=POINT,NODES=',4*nspzone(nz,n),&
+                   ',ELEMENTS=',nspzone(nz,n),',ZONETYPE=FEQUADRILATERAL,'
+      DO j=1,nspzone(nz,n)
+        jj = spzone(nz,j,n)
+        xx = vertx(1,jj,n)+(zvertx(1,jj,n) - zcellx(jj,n))*LDomainx
+        yy = verty(1,jj,n)+(zverty(1,jj,n) - zcelly(jj,n))*LDomainy
+        WRITE(tec_unit,9015)xx,yy
+      ENDDO
 
-  DO j=1,nobjcells(n)
-    WRITE(tec_unit,9015)vertx(2,j,n),verty(2,j,n)
-  ENDDO
- 
-  DO j=1,nobjcells(n)
-    WRITE(tec_unit,9015)vertx(3,j,n),verty(3,j,n)
-  ENDDO               
+      DO j=1,nspzone(nz,n)
+        jj = spzone(nz,j,n)
+        xx = vertx(2,jj,n)+(zvertx(2,jj,n) - zcellx(jj,n))*LDomainx
+        yy = verty(2,jj,n)+(zverty(2,jj,n) - zcelly(jj,n))*LDomainy
+        WRITE(tec_unit,9015)xx,yy
+      ENDDO
 
-  DO j=1,nobjcells(n)
-    WRITE(tec_unit,9015)vertx(4,j,n),verty(4,j,n)
-  ENDDO
+      DO j=1,nspzone(nz,n) 
+        jj = spzone(nz,j,n)
+        xx = vertx(3,jj,n)+(zvertx(3,jj,n) - zcellx(jj,n))*LDomainx
+        yy = verty(3,jj,n)+(zverty(3,jj,n) - zcelly(jj,n))*LDomainy
+        WRITE(tec_unit,9015)xx,yy
+      ENDDO               
+
+      DO j=1,nspzone(nz,n) 
+        jj = spzone(nz,j,n)
+        xx = vertx(4,jj,n)+(zvertx(4,jj,n) - zcellx(jj,n))*LDomainx
+        yy = verty(4,jj,n)+(zverty(4,jj,n) - zcelly(jj,n))*LDomainy
+        WRITE(tec_unit,9015)xx,yy
+      ENDDO
    
-ENDDO
+      DO j=1,nspzone(nz,n)
+        WRITE(tec_unit,9013)j,j+nspzone(nz,n),j+2*nspzone(nz,n),j+3*nspzone(nz,n)
+      ENDDO
 
-totp = 0
-DO n = 1,nsphere
-  snp = nobjcells(n)
-  DO j=1,snp
-    WRITE(tec_unit,9013)j+totp,j+snp+totp,j+2*snp+totp,j+3*snp+totp 
+    ENDIF
   ENDDO
-  totp = totp + 4*snp
 ENDDO
 
 
@@ -193,7 +238,7 @@ ENDDO
 
 END SUBROUTINE fd_tecwrite_sph_v
 
-SUBROUTINE fd_tecwrite_sph_s(tec_unit,nsphere,nsurfpoints,posx,posy)
+SUBROUTINE fd_tecwrite_sph_s(tec_unit,nsphere,nsurfpoints,posx,posy,zonex,zoney)
 
 USE precision,      ONLY : r_single
 USE shared_data,    ONLY : title
@@ -202,16 +247,51 @@ IMPLICIT NONE
 
 INTEGER,INTENT(IN)  :: tec_unit,nsphere
 INTEGER,INTENT(IN),DIMENSION(:)   :: nsurfpoints
+INTEGER,INTENT(IN),DIMENSION(:,:) :: zonex,zoney
 REAL(KIND = r_single),INTENT(IN),DIMENSION(:,:) :: posx,posy
-INTEGER :: j,n
+INTEGER :: j,n,czonex,czoney,nspzone(4,nsphere),nz
+INTEGER,ALLOCATABLE,SAVE :: spzone(:,:,:)
+LOGICAL,SAVE             :: entered = .FALSE.
+
+IF(.NOT.entered)THEN
+  ALLOCATE(spzone(4,MAXVAL(nsurfpoints(1:nsphere)),nsphere))
+  entered = .TRUE.
+ENDIF
+
+spzone = 0
+nspzone = 0
+
+DO n = 1,nsphere
+  czonex = zonex(1,n)
+  czoney = zoney(1,n)
+  DO j = 1,nsurfpoints(n)
+    IF(zonex(j,n) /= czonex .AND. zoney(j,n) /= czoney)THEN !--Crossed edge
+      nspzone(4,n) = nspzone(4,n) + 1
+      spzone(4,nspzone(4,n),n) = j
+    ELSEIF(zonex(j,n) /= czonex .AND. zoney(j,n) == czoney)THEN !--Crossed e-w boundary but no edge
+      nspzone(3,n) = nspzone(3,n) + 1
+      spzone(3,nspzone(3,n),n) = j
+    ELSEIF(zonex(j,n) == czonex .AND. zoney(j,n) /= czoney)THEN !--Crossed n-s boundary but no edge 
+      nspzone(2,n) = nspzone(2,n) + 1
+      spzone(2,nspzone(2,n),n) = j
+    ELSE
+      nspzone(1,n) = nspzone(1,n) + 1
+      spzone(1,nspzone(1,n),n) = j
+    ENDIF         
+  ENDDO
+ENDDO
 
 WRITE(tec_unit,'(A)')'TITLE="'//TRIM(title)//'"'
 WRITE(tec_unit,9012)
 
 DO n=1,nsphere
-  WRITE(tec_unit,9013)nsurfpoints(n)
-  DO j=1,nsurfpoints(n)
-    WRITE(tec_unit,9015) posx(j,n),posy(j,n)
+  DO nz = 1,4
+    IF(nspzone(nz,n) > 0)THEN
+      WRITE(tec_unit,9013)nspzone(nz,n)
+      DO j=1,nspzone(nz,n)
+        WRITE(tec_unit,9015) posx(spzone(nz,j,n),n),posy(spzone(nz,j,n),n)
+      ENDDO
+    ENDIF
   ENDDO
 ENDDO
 

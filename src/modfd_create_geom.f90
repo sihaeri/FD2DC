@@ -17,7 +17,8 @@ USE shared_data,        ONLY : objcentx,objcenty,objradius,objbradius,nsurfpoint
                                nusseltpointx,nusseltpointy,calclocalnusselt,nnusseltpoints,&
                                nusseltcentx,nusseltcenty,nusseltds,nusseltnx,nusseltny,nusseltpoint_interp,&
                                nusseltinterpx,nusseltinterpy,nusseltpoint_cvx,nusseltpoint_cvy,objvol,&
-                               surfpointxinit,surfpointyinit,&
+                               surfpointxinit,surfpointyinit,zsurfpointx,zsurfpointy,zobjcellx,zobjcelly,&
+                               zobjcellvertx,zobjcellverty,xPeriodic,yPeriodic,LDomainx,LDomainy,&
                                objcellvertx,objcellverty,objpoint_interpx,objpoint_interpy,objcell_overlap,&
                                problem_name,problem_len,read_fd_geom,dxmean,hypre_A,Hypre_b,Hypre_x,mpi_comm ,nij,&
                                dxmeanmovedtot,objcentxinit,objcentyinit,objcellxinit,dxmeanmoved,&
@@ -28,11 +29,10 @@ USE real_parameters,    ONLY : two,pi,half,zero,four,large,three,small,one
 USE modfd_tecwrite,     ONLY : fd_tecwrite_sph_s,fd_tecwrite_sph_v
 
 IMPLICIT NONE
-LOGICAL                 :: failed
-INTEGER                 :: i,j,ncell,ii,jj,mini,maxnn,maxnnb,n,maxnobjcell,maxnsurfpoint,ip1,ip,jp,is,ie,js,je,error
+INTEGER                 :: i,j,ncell,ii,jj,mini,maxnn,maxnnb,n,maxnobjcell,maxnsurfpoint,ip1,error
 INTEGER,ALLOCATABLE     :: nn(:),nnb(:)
 REAL(KIND = r_single)   :: dtheta,theta,domain_vol,dx,dy,mindist,unitvectx,unitvecty,&
-                           dist,posx,posy,rp,vecx,vecy,xp,yp,coeft,dxmeanl,costheta,sintheta,ds
+                           dist,posx,posy,rp,vecx,vecy,costheta,sintheta,ds
 REAL(KIND = r_single),ALLOCATABLE :: dummyposarray(:,:,:),dummyobjcellx(:,:),dummyobjcelly(:,:),&
                                      dummydx(:,:),dummydy(:,:)                       
 
@@ -83,144 +83,8 @@ DO n = 1,nsphere
 !  CALL fd_create_ellipse_surf(surfpointx(:,n),surfpointy(:,n),nsurfpoints(n),objbradius(n),objradius(n))
 !  surfpointx(:,n) = surfpointx(:,n) + objcentx(n)
 !  surfpointy(:,n) = surfpointy(:,n) + objcenty(n)
-  IF(calclocalnusselt)THEN
-    !--Used for single tube
-    dtheta = pi / REAL(nnusseltpoints(n)-1)
-    !--Ued for tube bank
-    !dtheta = two*pi / REAL(nnusseltpoints(n)-1)
-    DO i=1,nnusseltpoints(n)
-  
-      theta = REAL(i-1)*dtheta
-      costheta = COS(pi-theta)
-      sintheta = SIN(pi-theta)
-      nusseltpointx(i,n) = objcentx(n)+(objradius(n)*objbradius(n)/ &
-                      SQRT((objradius(n)*costheta)**2+(objbradius(n)*sintheta)**2))*costheta
-      nusseltpointy(i,n) = objcenty(n)+(objradius(n)*objbradius(n)/ &
-                      SQRT((objradius(n)*costheta)**2+(objbradius(n)*sintheta)**2))*sintheta
-!      nusseltpointx(i,n) = objcentx(n)+objradius(n)*COS(theta)
-!      nusseltpointy(i,n) = objcenty(n)+objradius(n)*SIN(theta)
-    ENDDO
-
-    DO i=1,nnusseltpoints(n)-1
-      
-      ip1 = i + 1
-
-      !--Calc centre points
-      nusseltcentx(i,n) = (nusseltpointx(i,n) + nusseltpointx(ip1,n))/two
-      nusseltcenty(i,n) = (nusseltpointy(i,n) + nusseltpointy(ip1,n))/two
-
-      !--Locate the centre point on the Eul grid
-      CALL find_single_point(nusseltcentx(i,n), nusseltcenty(i,n), nusseltpoint_cvx(1,i,n),nusseltpoint_cvy(1,i,n))
-        
-       !--For single tube     
-      vecx = nusseltpointx(ip1,n) - nusseltpointx(i,n) 
-      vecy = nusseltpointy(ip1,n) - nusseltpointy(i,n) 
-      !--For bank
-      !vecx = nusseltpointx(i,n) - nusseltpointx(ip1,n) 
-      !vecy = nusseltpointy(i,n) - nusseltpointy(ip1,n) 
-             
-      nusseltds(i,n) = SQRT(vecx**2 + vecy**2)
-      IF(nusseltds(i,n) < small) THEN
-        PRINT *,'Error - Coordinates co-exits - undefined normal!'
-        PAUSE
-      ENDIF
-      
-      !--Surface element normals (outward)
-      nusseltnx(i,n) = -vecy/nusseltds(i,n)
-      nusseltny(i,n) = vecx/nusseltds(i,n)
-
-      !--Ensure the calculation is corrent
-      IF((nusseltcentx(i,n) - objcentx(n))*nusseltnx(i,n) + &
-         (nusseltcenty(i,n) - objcenty(n))*nusseltny(i,n) < zero)THEN
-
-         PRINT *,'Error - outward normal not calculated!'
-         PAUSE
-	  ENDIF
-
-    ENDDO
-
-    DO i=1,nnusseltpoints(n)-1
-      
-      coeft = one
-      dxmeanl = ( (x(nusseltpoint_cvx(1,i,n)) - x(nusseltpoint_cvx(1,i,n)-1)) + & 
-                  (y(nusseltpoint_cvy(1,i,n)) - y(nusseltpoint_cvy(1,i,n)-1))   )/two
-      DO          
-        failed = .FALSE. 
-        !--first interpolation point
-        xp = nusseltcentx(i,n) + coeft * nusseltnx(i,n) * dxmeanl 
-        yp = nusseltcenty(i,n) + coeft * nusseltny(i,n) * dxmeanl 
-
-        !--Locate the point
-        CALL find_single_point(xp,yp,ip,jp)
-        
-        !--indentify the neighbours      
-        IF(xp > xc(ip))THEN
-          is = ip
-          ie = ip + 1
-        ELSE
-          is = ip - 1
-          ie = ip
-        ENDIF
-
-        IF(yp > yc(jp))THEN
-          js = jp
-          je = jp + 1
-        ELSE
-          js = jp - 1
-          je = jp
-        ENDIF
-
-        !--Ensure all neighbours are outside of the object
-        DO ii = is,ie
-          DO jj = js,je
-            IF( ( (xc(ii) - nusseltcentx(i,n))*nusseltnx(i,n) + &
-                  (yc(jj) - nusseltcenty(i,n))*nusseltny(i,n)    ) < zero )THEN
-
-               failed = .TRUE.
-               coeft = coeft + half * dxmeanl
-            ENDIF
-              
-          ENDDO
-        ENDDO
-        IF(.NOT. failed)EXIT
-      ENDDO 
-
-      nusseltpoint_interp(1:4,1,i,n) = (/is,ie,js,je/)
-      nusseltpoint_cvx(2,i,n) = ip
-      nusseltpoint_cvy(2,i,n) = jp
-      nusseltinterpx(1,i,n) = xp
-      nusseltinterpy(1,i,n) = yp
-
-      !--second point has 2 times the distance of the first point to the surface centre
-      !--Assuming a convex surface no need to check for the neighbours
-      nusseltinterpx(2,i,n) = two * nusseltinterpx(1,i,n) - nusseltcentx(i,n) 
-      nusseltinterpy(2,i,n) = two * nusseltinterpy(1,i,n) - nusseltcenty(i,n)
+  IF(calclocalnusselt)CALL fd_create_interpmol_nus(n)
     
-      CALL find_single_point(nusseltinterpx(2,i,n),nusseltinterpy(2,i,n),ip,jp)
-
-      IF(xp > xc(ip))THEN
-        is = ip
-        ie = ip + 1
-      ELSE
-        is = ip - 1
-        ie = ip
-      ENDIF
-
-      IF(yp > yc(jp))THEN
-        js = jp
-        je = jp + 1
-      ELSE
-        js = jp - 1
-        je = jp
-      ENDIF
-
-      nusseltpoint_interp(1:4,2,i,n) = (/is,ie,js,je/)
-      nusseltpoint_cvx(3,i,n) = ip
-      nusseltpoint_cvy(3,i,n) = jp 
-       
-    ENDDO
-  ENDIF
-
   IF(calcsurfforce)CALL fd_create_interpmol(n)
   
   IF(.NOT. read_fd_geom)THEN  
@@ -297,12 +161,15 @@ ENDDO
 
 IF(.NOT. read_fd_geom)THEN
   maxnobjcell = MAXVAL(nobjcells(:),1)
-  ALLOCATE(objcellx(maxnobjcell,nsphere),objcelly(maxnobjcell,nsphere),&
-           objcellvol(maxnobjcell,nsphere),objpoint_cvx(maxnobjcell,nsphere),&
+  ALLOCATE(objcellx(maxnobjcell,nsphere),objcelly(maxnobjcell,nsphere),zobjcellx(maxnobjcell,nsphere),&
+           zobjcelly(maxnobjcell,nsphere),objcellvol(maxnobjcell,nsphere),objpoint_cvx(maxnobjcell,nsphere),&
            objpoint_cvy(maxnobjcell,nsphere),objcellvertx(4,maxnobjcell,nsphere),objcellverty(4,maxnobjcell,nsphere),&
+           zobjcellvertx(4,maxnobjcell,nsphere),zobjcellverty(4,maxnobjcell,nsphere),&
            objpoint_interpx(2,maxnobjcell,nsphere),objpoint_interpy(2,maxnobjcell,nsphere),&
            objcell_overlap(maxnobjcell,nsphere))
   objcell_overlap = 0
+  zobjcellx = 0; zobjcelly = 0
+  zobjcellvertx = 0; zobjcellverty = 0
   DO n = 1,nsphere
    
     objcellx(1:nobjcells(n),n) = dummyobjcellx(1:nobjcells(n),n)
@@ -321,6 +188,82 @@ IF(.NOT. read_fd_geom)THEN
     objcellverty(4,1:nobjcells(n),n) = objcelly(1:nobjcells(n),n) + half*dummydy(1:nobjcells(n),n)
 
   ENDDO 
+  
+  IF(xPeriodic == 1)THEN
+    DO n = 1,nsphere
+      DO i = 1,nsurfpoints(n)
+        IF(surfpointx(i,n) > x(nim))THEN
+          surfpointx(i,n) = surfpointx(i,n) - LDomainx
+          zsurfpointx(i,n) = zsurfpointx(i,n) + 1
+        ELSEIF(surfpointx(i,n) < x(1))THEN
+          surfpointx(i,n) = surfpointx(i,n) + LDomainx
+          zsurfpointx(i,n) = zsurfpointx(i,n) - 1
+        ENDIF
+      ENDDO
+    ENDDO
+    DO n = 1, nsphere
+      DO i = 1,nobjcells(n)
+        
+        IF(objcellx(i,n) > x(nim))THEN
+          objcellx(i,n) = objcellx(i,n) - LDomainx !--Went through the east boundary
+          zobjcellx(i,n) = zobjcellx(i,n) + 1
+        ELSEIF(objcellx(i,n) < x(1))THEN
+          objcellx(i,n) = objcellx(i,n) + LDomainx !--Went through the west boundary
+          zobjcellx(i,n) = zobjcellx(i,n) - 1
+        ENDIF
+
+        DO j = 1,4
+          IF(objcellvertx(j,i,n) > x(nim))THEN
+            objcellvertx(j,i,n) = objcellvertx(j,i,n) - LDomainx !--Went through the east boundary
+            zobjcellvertx(j,i,n) = zobjcellvertx(j,i,n) + 1
+          ELSEIF(objcellvertx(j,i,n) < x(1))THEN
+            objcellvertx(j,i,n) = objcellvertx(j,i,n) + LDomainx !--Went through the west boundary
+            zobjcellvertx(j,i,n) = zobjcellvertx(j,i,n) - 1
+          ENDIF          
+        ENDDO
+
+      ENDDO
+    ENDDO
+  ENDIF
+
+  IF(yPeriodic == 1)THEN
+    
+    DO n = 1,nsphere
+      DO i = 1,nsurfpoints(n)
+        IF(surfpointy(i,n) > y(njm))THEN
+          surfpointy(i,n) = surfpointy(i,n) - LDomainy
+          zsurfpointy(i,n) = zsurfpointy(i,n) + 1
+        ELSEIF(surfpointy(i,n) < y(1))THEN
+          surfpointy(i,n) = surfpointy(i,n) + LDomainy
+          zsurfpointy(i,n) = zsurfpointy(i,n) - 1
+        ENDIF
+      ENDDO
+    ENDDO
+
+    DO n = 1, nsphere
+      DO i = 1,nobjcells(n)
+        
+        IF(objcelly(i,n) > y(njm))THEN
+          objcelly(i,n) = objcelly(i,n) - LDomainy !--Went through the east boundary
+          zobjcelly(i,n) = zobjcelly(i,n) + 1
+        ELSEIF(objcelly(i,n) < y(1))THEN
+          objcelly(i,n) = objcelly(i,n) + LDomainy !--Went through the west boundary
+          zobjcelly(i,n) = zobjcelly(i,n) - 1
+        ENDIF
+
+        DO j = 1,4
+          IF(objcellverty(j,i,n) > y(njm))THEN
+            objcellverty(j,i,n) = objcellverty(j,i,n) - LDomainy !--Went through the north boundary
+            zobjcellverty(j,i,n) = zobjcellverty(j,i,n) + 1
+          ELSEIF(objcellverty(j,i,n) < y(1))THEN
+            objcellverty(j,i,n) = objcellverty(j,i,n) + LDomainy !--Went through the south boundary
+            zobjcellverty(j,i,n) = zobjcellverty(j,i,n) - 1
+          ENDIF          
+        ENDDO
+
+      ENDDO
+    ENDDO
+  ENDIF
 
   DO n = 1,nsphere
     DO i=1,nobjcells(n)
@@ -359,10 +302,10 @@ CALL find_objcells
 
 !--draw mesh using tecplot
 OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//'_init'//'_sph_v.plt',STATUS='NEW')
-CALL fd_tecwrite_sph_v(plt_unit,nsphere,nobjcells,objcellvertx,objcellverty)
+CALL fd_tecwrite_sph_v(plt_unit,nsphere,nobjcells,objcellvertx,objcellverty,zobjcellx,zobjcelly,zobjcellvertx,zobjcellverty)
 CLOSE(plt_unit)
 OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//'_init'//'_sph_s.plt',STATUS='NEW')
-CALL fd_tecwrite_sph_s(plt_unit,nsphere,nsurfpoints,surfpointx,surfpointy)
+CALL fd_tecwrite_sph_s(plt_unit,nsphere,nsurfpoints,surfpointx,surfpointy,zsurfpointx,zsurfpointy)
 CLOSE(plt_unit)
 
 
@@ -462,19 +405,27 @@ END SUBROUTINE find_objcells
 SUBROUTINE fd_track_single_point(xp,yp,ipo,jpo,ip,jp,interpx,interpy,error)
 
 USE precision,      ONLY : r_single
-USE shared_data,    ONLY : x,y,deltalen,xc,yc,nim,njm
+USE shared_data,    ONLY : x,y,deltalen,xc,yc,nim,njm,xPeriodic,yPeriodic
 USE parameters,     ONLY : maxmove
 
 IMPLICIT NONE
 INTEGER,INTENT(INOUT)   :: ip,jp,ipo,jpo,error,interpx(2),interpy(2)
 REAL(KIND = r_single),INTENT(IN)   :: xp,yp
-INTEGER                            :: i
+INTEGER                            :: i,nim2,njm2,ii
+
+nim2 = nim - 1
+njm2 = njm - 1
 
 error = 0
 DO i = ipo - maxmove,ipo + maxmove
-  IF(i <= 1 .OR. i > nim)CYCLE
-  IF(xp <= x(i) .AND. xp > x(i-1))THEN
-    ip = i
+  IF(xPeriodic == 1)THEN
+    ii = 2+MOD(nim2+MOD(i-2,nim2),nim2)
+  ELSE
+    ii = i 
+    IF(ii <= 1 .OR. ii > nim)CYCLE
+  ENDIF
+  IF(xp <= x(ii) .AND. xp > x(ii-1))THEN
+    ip = ii
     EXIT
   ENDIF
 ENDDO
@@ -485,9 +436,14 @@ IF( i == ipo + maxmove + 1)THEN
 ENDIF
       
 DO i = jpo - maxmove,jpo + maxmove
-  IF(i <= 1 .OR. i > njm)CYCLE
-  IF(yp <= y(i) .AND. yp > y(i-1))THEN
-    jp = i
+  IF(yPeriodic == 1)THEN
+    ii = 2+MOD(njm2+MOD(i-2,njm2),njm2)
+  ELSE
+    ii = i
+    IF(ii <= 1 .OR. ii > njm)CYCLE
+  ENDIF
+  IF(yp <= y(ii) .AND. yp > y(ii-1))THEN
+    jp = ii
     EXIT
   ENDIF
 ENDDO
@@ -656,13 +612,14 @@ END FUNCTION phir6
 SUBROUTINE fd_calc_sources(predict_or_correct,resor,iter)
 
 USE parameters,     ONLY : force_predict,force_correct
-USE shared_data,    ONLY : fdsu,fdsv,objfx,objfy,objru,objrv,obju,objv,&
+USE shared_data,    ONLY : fdsu,fdsv,objfx,objfy,objru,objrv,obju,objv,xPeriodic,yPeriodic,&
                            objpoint_cvx, objpoint_cvy,x,y,objcellx,objcelly,objcell_overlap,&
                            xc,yc,objcentu,objcentv,objcentom,objcentx,objcenty,&
                            dt,li,objcellvol,nobjcells,u,v,densitp,nij,fd_urf,objvol,&
                            nim,njm,fx,fy,fdsub,fdsvb,nj,objtp,objt,objrt,objq,fdst,t,&
                            nsphere,fdsvc,fdsuc,fdstc,apu,apv,objapu,objapv,objapt,apt,&
-                           objpoint_interpx,objpoint_interpy,stationary,isotherm,objqp,cpp
+                           objpoint_interpx,objpoint_interpy,stationary,isotherm,objqp,cpp,&
+                           zobjcenty,zobjcentx,zobjcelly,zobjcellx,LDomainx,LDomainy
 USE precision,      ONLY : r_single
 USE real_parameters,ONLY : zero,one
 IMPLICIT NONE
@@ -671,10 +628,11 @@ IMPLICIT NONE
 INTEGER              :: predict_or_correct,iter
 REAL(KIND = r_single):: resor 
 !--locals
-INTEGER             :: i,j,n,nn  !,ij
-REAL(KIND = r_single) :: dx,dy,del,curresor,maxresor !,fdsue,fdsuw,fdsun,fdsus,fdsve,fdsvw,fdsvs,fdsvn
-!REAL(KIND = r_single),ALLOCATABLE :: dummyfdsub(:),dummyfdsvb(:)
+INTEGER             :: i,j,n,nn,ii,jj,nim2,njm2,ij
+REAL(KIND = r_single) :: dx,dy,del,curresor,maxresor,xp,yp
 
+nim2 = nim - 1
+njm2 = njm - 1
 fdsuc = zero
 fdsvc = zero
 fdstc = zero
@@ -686,13 +644,18 @@ objt = zero
 DO nn = 1,nsphere
   DO n = 1,nobjcells(nn)
     DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
-      dx = x(i) - x(i-1)
+      ii = i + xPeriodic*(MAX(2-i,0)*nim2 + MIN(nim-i,0)*nim2)
+      xp = objcellx(n,nn) + xPeriodic*(MAX(2-i,0)*LDomainx + MIN(nim-i,0)*LDomainx)
+      dx = x(ii) - x(ii-1)
       DO j = objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
-        dy = y(j) - y(j-1)
-        del = fd_calc_delta(xc(i),yc(j),objcellx(n,nn),objcelly(n,nn),dx, dy)*dx*dy
-        obju(n,nn) = obju(n,nn) + u(li(i)+j)*del
-        objv(n,nn) = objv(n,nn) + v(li(i)+j)*del
-        objt(n,nn) = objt(n,nn) + t(li(i)+j)*del
+        jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2)
+        yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
+        dy = y(jj) - y(jj-1)
+        del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx, dy)*dx*dy
+        ij = li(ii)+jj
+        obju(n,nn) = obju(n,nn) + u(ij)*del
+        objv(n,nn) = objv(n,nn) + v(ij)*del
+        objt(n,nn) = objt(n,nn) + t(ij)*del
        ENDDO
     ENDDO
    ENDDO
@@ -703,8 +666,8 @@ CALL fd_calc_rigidvel
 IF(isotherm)THEN
   DO nn = 1,nsphere
     DO n = 1,nobjcells(nn)
-      objru(n,nn) = objcentu(nn) - objcentom(nn)*(objcelly(n,nn) - objcenty(nn))
-      objrv(n,nn) = objcentv(nn) + objcentom(nn)*(objcellx(n,nn) - objcentx(nn))
+      objru(n,nn) = objcentu(nn) - objcentom(nn)*(objcelly(n,nn) - objcenty(nn)+(zobjcelly(n,nn) - zobjcenty(nn))*LDomainy)
+      objrv(n,nn) = objcentv(nn) + objcentom(nn)*(objcellx(n,nn) - objcentx(nn)+(zobjcellx(n,nn) - zobjcentx(nn))*LDomainx)
       objrt(n,nn) = objtp(nn)
       objfx(n,nn) = densitp(nn)/dt*(objru(n,nn) - obju(n,nn))
       objfy(n,nn) = densitp(nn)/dt*(objrv(n,nn) - objv(n,nn))
@@ -715,8 +678,8 @@ ELSE
   objtp = zero
   DO nn = 1,nsphere
     DO n = 1,nobjcells(nn)
-      objru(n,nn) = objcentu(nn) - objcentom(nn)*(objcelly(n,nn) - objcenty(nn))
-      objrv(n,nn) = objcentv(nn) + objcentom(nn)*(objcellx(n,nn) - objcentx(nn))
+      objru(n,nn) = objcentu(nn) - objcentom(nn)*(objcelly(n,nn) - objcenty(nn)+(zobjcelly(n,nn) - zobjcenty(nn))*LDomainy)
+      objrv(n,nn) = objcentv(nn) + objcentom(nn)*(objcellx(n,nn) - objcentx(nn)+(zobjcellx(n,nn) - zobjcentx(nn))*LDomainx)
       objfx(n,nn) = densitp(nn)/dt*(objru(n,nn) - obju(n,nn))
       objfy(n,nn) = densitp(nn)/dt*(objrv(n,nn) - objv(n,nn))
       objq(n,nn) = objqp(nn)
@@ -729,13 +692,18 @@ DO nn = 1,nsphere
   DO n = 1,nobjcells(nn)
     !IF(objcell_overlap(n,nn) == 0)THEN
       DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
-        dx = x(i) - x(i-1)
+        ii = i + xPeriodic*(MAX(2-i,0)*nim2 + MIN(nim-i,0)*nim2)
+        xp = objcellx(n,nn) + xPeriodic*(MAX(2-i,0)*LDomainx + MIN(nim-i,0)*LDomainx)
+        dx = x(ii) - x(ii-1)
         DO j =objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
-          dy = y(j) - y(j-1)
-          del = fd_calc_delta(xc(i),yc(j),objcellx(n,nn),objcelly(n,nn),dx, dy)*objcellvol(n,nn)
-          fdsuc(li(i)+j) = fdsuc(li(i)+j) + objfx(n,nn)*del*dx*dy
-          fdsvc(li(i)+j) = fdsvc(li(i)+j) + objfy(n,nn)*del*dx*dy
-          fdstc(li(i)+j) = fdstc(li(i)+j) + objq(n,nn)*del*dx*dy
+          jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2)
+          yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
+          dy = y(jj) - y(jj-1)
+          del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx,dy)*objcellvol(n,nn)
+          ij = li(ii)+jj
+          fdsuc(ij) = fdsuc(ij) + objfx(n,nn)*del*dx*dy
+          fdsvc(ij) = fdsvc(ij) + objfy(n,nn)*del*dx*dy
+          fdstc(ij) = fdstc(ij) + objq(n,nn)*del*dx*dy
         ENDDO
       ENDDO
     !ENDIF
@@ -743,72 +711,23 @@ DO nn = 1,nsphere
 ENDDO 
 
 IF(predict_or_correct==force_predict)THEN
-!  DO i=2,nim
-!    dx=x(i)-x(i-1)
-!    DO j=2,njm
-!      dy=y(j)-y(j-1)
-!      ij=li(i)+j
-!      fdsue=dummyfdsu(ij+nj)*fx(i)+dummyfdsu(ij)*(one-fx(i))
-!      fdsuw=dummyfdsu(ij)*fx(i-1)+dummyfdsu(ij-nj)*(one-fx(i-1))
-!      fdsun=dummyfdsu(ij+1)*fy(j)+dummyfdsu(ij)*(one-fy(j))
-!      fdsus=dummyfdsu(ij)*fy(j-1)+dummyfdsu(ij-1)*(one-fy(j-1))
-!
-!      fdsve=dummyfdsv(ij+nj)*fx(i)+dummyfdsv(ij)*(one-fx(i))
-!      fdsvw=dummyfdsv(ij)*fx(i-1)+dummyfdsv(ij-nj)*(one-fx(i-1))
-!      fdsvn=dummyfdsv(ij+1)*fy(j)+dummyfdsv(ij)*(one-fy(j))
-!      fdsvs=dummyfdsv(ij)*fy(j-1)+dummyfdsv(ij-1)*(one-fy(j-1))
-!
-!      fdsub(ij) = ((fdsue + fdsuw)*dy + (fdsun + fdsus)*dx)/(dx + dy)
-!      fdsvb(ij) = ((fdsve + fdsvw)*dy + (fdsvn + fdsvs)*dx)/(dx + dy)
-!
-!    ENDDO
-!  ENDDO
 
   fdsu = fdsuc
   fdsv = fdsvc
   fdst = fdstc
 
-!  DO i=2,nim
-!    dx = x(i) - x(i-1)
-!    DO j=2,njm
-!      dy = y(j) - y(j-1)
-!      u(li(i)+j) = u(li(i)+j) + dt/densitp(1)*fdsuc(li(i)+j)/dx/dy  !--*dt/densitp(1)*
-!      v(li(i)+j) = v(li(i)+j) + dt/densitp(1)*fdsvc(li(i)+j)/dx/dy
-!      t(li(i)+j) = t(li(i)+j) + dt/densitp(1)*fdstc(li(i)+j)/dx/dy
-!    ENDDO
-!  ENDDO
-
   resor = zero
 ELSEIF(predict_or_correct==force_correct)THEN
-
-!  DO i=2,nim
-!    dx=x(i)-x(i-1)
-!    DO j=2,njm
-!      dy=y(j)-y(j-1)
-!      ij=li(i)+j
-!      fdsue=dummyfdsu(ij+nj)*fx(i)+dummyfdsu(ij)*(one-fx(i))
-!      fdsuw=dummyfdsu(ij)*fx(i-1)+dummyfdsu(ij-nj)*(one-fx(i-1))
-!      fdsun=dummyfdsu(ij+1)*fy(j)+dummyfdsu(ij)*(one-fy(j))
-!      fdsus=dummyfdsu(ij)*fy(j-1)+dummyfdsu(ij-1)*(one-fy(j-1))
-!     
-!      fdsve=dummyfdsv(ij+nj)*fx(i)+dummyfdsv(ij)*(one-fx(i))
-!      fdsvw=dummyfdsv(ij)*fx(i-1)+dummyfdsv(ij-nj)*(one-fx(i-1))
-!      fdsvn=dummyfdsv(ij+1)*fy(j)+dummyfdsv(ij)*(one-fy(j))
-!      fdsvs=dummyfdsv(ij)*fy(j-1)+dummyfdsv(ij-1)*(one-fy(j-1))
-!
-!      dummyfdsub(ij) = ((fdsue + fdsuw)*dy + (fdsun + fdsus)*dx)/(dx + dy)
-!      dummyfdsvb(ij) = ((fdsve + fdsvw)*dy + (fdsvn + fdsvs)*dx)/(dx + dy)
-!
-!    ENDDO
-!  ENDDO
 
   maxresor = zero
   IF(iter > 1)THEN
     DO nn = 1,nsphere
       DO n = 1,nobjcells(nn)
         DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
+          ii = i + xPeriodic*(MAX(2-i,0)*nim2 + MIN(nim-i,0)*nim2)
           DO j = objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
-            curresor = ABS(fdsuc(li(i)+j)/fdsu(li(i)+j)) 
+            jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2)
+            curresor = ABS(fdsuc(li(ii)+jj)/fdsu(li(ii)+jj)) 
             IF(curresor > maxresor)THEN
               maxresor = curresor
 !              imax=i
@@ -820,19 +739,8 @@ ELSEIF(predict_or_correct==force_correct)THEN
     ENDDO
   ENDIF
 
-!  DO i=2,nim
-!    dx = x(i) - x(i-1)
-!    DO j=2,njm
-!      dy = y(j) - y(j-1)
-!      u(li(i)+j) = u(li(i)+j) + fd_urf*apu(li(i) + j)*fdsuc(li(i)+j) !/dx/dy  !--*dt/densitp(1)*
-!      v(li(i)+j) = v(li(i)+j) + fd_urf*apv(li(i) + j)*fdsvc(li(i)+j) !/dx/dy
-!      t(li(i)+j) = t(li(i)+j) + fd_urf*dt/densitp(1)*fdstc(li(i)+j)/dx/dy
-!    ENDDO
-!  ENDDO
-
   resor = maxresor    
-!  fdsub = fdsub + fd_urf*dummyfdsub
-!  fdsvb = fdsvb + fd_urf*dummyfdsvb
+
   fdsu = fdsu + fd_urf*fdsuc
   fdsv = fdsv + fd_urf*fdsvc
   IF(isotherm)THEN
@@ -842,7 +750,7 @@ ELSEIF(predict_or_correct==force_correct)THEN
   ENDIF
 ENDIF
 
-!DEALLOCATE(dummyfdsu,dummyfdsv,dummyfdsub,dummyfdsvb)
+
 
 END SUBROUTINE fd_calc_sources
 
@@ -850,7 +758,8 @@ SUBROUTINE fd_calc_rigidvel
 
 USE shared_data,        ONLY : objcentu,objcentv,objcentom,nobjcells,objcellx,objcelly,&
                                objcentx,objcenty,objcellvol,obju,objv,nsphere,densitp,objvol,&
-                               objcentmi,up,vp,omp,stationary,forcedmotion,dt,Fpq !,Fpw
+                               objcentmi,up,vp,omp,stationary,forcedmotion,dt,Fpq,LDomainx,LDomainy,&
+                               zobjcellx,zobjcelly,zobjcentx,zobjcenty
 USE precision,          ONLY : r_single
 USe real_parameters,    ONLY : zero
 IMPLICIT NONE
@@ -868,8 +777,8 @@ ELSE
     objcentv(nn) = zero
     objcentom(nn) = zero
     DO n= 1,nobjcells(nn)
-      rxmc = objcellx(n,nn) - objcentx(nn) 
-      rymc = objcelly(n,nn) - objcenty(nn)
+      rxmc = objcellx(n,nn) - objcentx(nn) + (zobjcellx(n,nn) - zobjcentx(nn))*LDomainx
+      rymc = objcelly(n,nn) - objcenty(nn) + (zobjcelly(n,nn) - zobjcenty(nn))*LDomainy
       objcentu(nn) = objcentu(nn) + objcellvol(n,nn) * (densitp(nn) * obju(n,nn) )
       objcentv(nn) = objcentv(nn) + objcellvol(n,nn) * (densitp(nn) * objv(n,nn) )
       objcentom(nn) = objcentom(nn) + objcellvol(n,nn) * densitp(nn) * (rxmc*objv(n,nn) - rymc*obju(n,nn))                                            
@@ -889,13 +798,16 @@ USE precision,          ONLY : r_single
 USE shared_data,        ONLY : nij,x,y,objpoint_cvx,objpoint_cvy,nsphere,nobjcells,objcellvol,den,deno,densit,&
                                xc,yc,objcellx,objcelly,li,nim,njm,densitp,objpoint_interpx,objpoint_interpy,&
                                celbeta,beta,betap,celkappa,celcp,cpf,cpp,kappaf,kappap,lcal,ien,&
-                               objcell_overlap
+                               objcell_overlap,xPeriodic,yPeriodic,LDomainx,LDomainy
 USE real_parameters,    ONLY : zero,one
 IMPLICIT NONE
 
-INTEGER                :: j,i,n,nn,ij
-REAL(KIND = r_single)  :: dx,dy,del,volp(nij)
+INTEGER                :: j,i,n,nn,ij,ii,jj,nim2,njm2
+REAL(KIND = r_single)  :: dx,dy,del,volp(nij),xp,yp
 REAL(KIND = r_single),OPTIONAL  :: outvolp(nij,nsphere)
+
+nim2 = nim - 1
+njm2 = njm - 1
 
 deno = den
 
@@ -910,11 +822,16 @@ DO nn = 1,nsphere
   DO n = 1,nobjcells(nn)
     !IF(objcell_overlap(n,nn) == 0)THEN
       DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
-        dx = x(i) - x(i-1)
-        DO j = objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
-          dy = y(j) - y(j-1)
-          del = fd_calc_delta(xc(i),yc(j),objcellx(n,nn),objcelly(n,nn),dx, dy)*objcellvol(n,nn)
-          volp(li(i)+j) = volp(li(i)+j) + del
+        ii = i + xPeriodic*(MAX(2-i,0)*nim2 + MIN(nim-i,0)*nim2)
+        xp = objcellx(n,nn) + xPeriodic*(MAX(2-i,0)*LDomainx + MIN(nim-i,0)*LDomainx)
+        dx = x(ii) - x(ii-1)
+        DO j =objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
+          jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2)
+          yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
+          dy = y(jj) - y(jj-1)
+          del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx, dy)*objcellvol(n,nn)
+          ij = li(ii) + jj
+          volp(ij) = volp(ij) + del
         ENDDO
       ENDDO
     !ENDIF
@@ -954,7 +871,8 @@ SUBROUTINE fd_calc_mi
 !--point, and discretised to set of control volumes. I_p = sum_{n=1}^N (rho_n*V_n*[(r_kr_k)sigma_{ij} - r_ir_j])
 !--for a planar rotation it enough to calculate sum{n=1}^N (rho_n*V_n *(r_x^2+r_y^2) )
 USE precision,        ONLY : r_single
-USE shared_data,      ONLY : nsphere,nobjcells,densitp,objcellvol,objcentmi,objcentx,objcenty,objcellx,objcelly
+USE shared_data,      ONLY : nsphere,nobjcells,densitp,objcellvol,objcentmi,objcentx,objcenty,objcellx,objcelly,&
+                             LDomainx,LDomainy,zobjcellx,zobjcelly,zobjcentx,zobjcenty 
 USE real_parameters,  ONLY : zero
 
 IMPLICIT NONE
@@ -965,8 +883,8 @@ REAL(KIND = r_single)    :: rxcp,rycp           !--CV centre - centroid vector
 DO nn = 1,nsphere 
   objcentmi(nn) = zero
   DO n = 1,nobjcells(nn)
-    rxcp = objcellx(n,nn) - objcentx(nn)
-    rycp = objcelly(n,nn) - objcenty(nn)
+    rxcp = objcellx(n,nn) - objcentx(nn) + (zobjcellx(n,nn) - zobjcentx(nn))*LDomainx
+    rycp = objcelly(n,nn) - objcenty(nn) + (zobjcelly(n,nn) - zobjcenty(nn))*LDomainy
     objcentmi(nn) = objcentmi(nn) + ( densitp(nn) * objcellvol(n,nn) * (rxcp*rxcp + rycp*rycp) )
   ENDDO
 ENDDO
@@ -1154,18 +1072,21 @@ USE shared_data,      ONLY : nsphere,nobjcells,objcentmi,objcentxo,objcentyo,obj
                              objcentxo,objcentyo,dt,objcentu,objcentv,objcento,objpoint_interpx,objpoint_interpy,&
                              objcellvertx,objcellverty,objcentx,objcenty,objcentuo,objcentvo,calcsurfforce,&
                              objpoint_cvx,objpoint_cvy,nsurfpoints,surfpointx,surfpointy,dxmeanmoved,up,vp,omp,&
-                             forcedmotion,lread,Fpq,Fpw,objvol,densitp,x,y,xc,yc,objcellvol,li,fdfcu,fdfcv
+                             forcedmotion,lread,Fpq,Fpw,objvol,densitp,x,y,xc,yc,objcellvol,li,fdfcu,fdfcv,&
+                             zobjcentx,zobjcentxo,zobjcenty,zobjcentyo,zobjcellx,zobjcelly,LDomainx,LDomainy,&
+                             zobjcellvertx,zobjcellverty,nim,njm,zsurfpointx,zsurfpointy
 USE real_parameters,  ONLY : zero,three,two,half,one,four
 
 IMPLICIT NONE
 
 INTEGER,INTENT(IN)    :: itr
 
-INTEGER               :: n,nn,ip,jp,error,moved,k,i,j
-REAL(KIND = r_single) :: lindispx,lindispy,rmcx,rmcy,rmcyr(4),rmcxr(4),dxmoved(nsphere),&
-                          dtk,del,dx,dy,Fx,Fy
+INTEGER               :: n,nn,ip,jp,error,moved,k,m,xShift,yShift
+REAL(KIND = r_single) :: lindispx,lindispy,rmcx,rmcy,rmcyr,rmcxr,dxmoved(nsphere),&
+                          dtk
 REAL(KIND = r_single),ALLOCATABLE,SAVE      :: tempFpq(:,:),tempFpw(:,:) 
 REAL(KIND = r_single),PARAMETER :: rone(4) = (/one,one,one,one/)
+INTEGER,PARAMETER               :: ione(4) = (/1,1,1,1/)
 
 IF(itr == 1)THEN
   ALLOCATE(tempFpq(2,nsphere),tempFpw(2,nsphere))
@@ -1197,6 +1118,9 @@ ELSE
   !moved = 0
   objcentxo(1:nsphere) = objcentx(1:nsphere)
   objcentyo(1:nsphere) = objcenty(1:nsphere)
+  zobjcentxo(1:nsphere)= zobjcentx(1:nsphere)
+  zobjcentyo(1:nsphere)= zobjcenty(1:nsphere)
+
   dtk = dt/REAL(subTimeStep,r_single)
   Fdfcu = zero
   Fdfcv = zero
@@ -1221,6 +1145,22 @@ ELSE
       objcentx(nn) = objcentx(nn) + lindispx
       objcenty(nn) = objcenty(nn) + lindispy
 
+      IF(objcentx(nn) > x(nim))THEN
+        objcentx(nn) = objcentx(nn) - LDomainx
+        zobjcentx(nn) = zobjcentx(nn) + 1
+      ELSEIF(objcentx(nn) < x(1))THEN
+        objcentx(nn) = objcentx(nn) + LDomainx 
+        zobjcentx(nn) = zobjcentx(nn) - 1
+      ENDIF
+
+      IF(objcenty(nn) > y(njm))THEN
+        objcenty(nn) = objcenty(nn) - LDomainy
+        zobjcenty(nn) = zobjcenty(nn) + 1
+      ELSEIF(objcenty(nn) < y(1))THEN
+        objcenty(nn) = objcenty(nn) + LDomainy
+        zobjcenty(nn) = zobjcenty(nn) - 1
+      ENDIF
+
     ENDDO
 
     CALL fd_calc_part_collision
@@ -1231,6 +1171,22 @@ ELSE
 
       objcentx(nn) = objcentx(nn) + lindispx
       objcenty(nn) = objcenty(nn) + lindispy
+
+      IF(objcentx(nn) > x(nim))THEN
+        objcentx(nn) = objcentx(nn) - LDomainx
+        zobjcentx(nn) = zobjcentx(nn) + 1
+      ELSEIF(objcentx(nn) < x(1))THEN
+        objcentx(nn) = objcentx(nn) + LDomainx 
+        zobjcentx(nn) = zobjcentx(nn) - 1
+      ENDIF
+
+      IF(objcenty(nn) > y(njm))THEN
+        objcenty(nn) = objcenty(nn) - LDomainy
+        zobjcenty(nn) = zobjcenty(nn) + 1
+      ELSEIF(objcenty(nn) < y(1))THEN
+        objcenty(nn) = objcenty(nn) + LDomainy
+        zobjcenty(nn) = zobjcenty(nn) - 1
+      ENDIF
 
     ENDDO  
   
@@ -1244,8 +1200,8 @@ ELSE
     
     moved = 0
     
-    lindispx = objcentx(nn) - objcentxo(nn)
-    lindispy = objcenty(nn) - objcentyo(nn) 
+    lindispx = objcentx(nn) - objcentxo(nn) + (zobjcentx(nn) - zobjcentxo(nn))*LDomainx
+    lindispy = objcenty(nn) - objcentyo(nn) + (zobjcenty(nn) - zobjcentyo(nn))*LDomainy
     
     IF(itr == 1 .AND. .NOT. lread)THEN
       !--Only add the part from collision
@@ -1260,12 +1216,31 @@ ELSE
     !--Update the material points
     !--orientation updated in a seperate subroutine
     DO n = 1,nobjcells(nn)
+      
+      xShift = (zobjcellx(n,nn) - zobjcentxo(nn))*LDomainx
+      yShift = (zobjcelly(n,nn) - zobjcentyo(nn))*LDomainy
+
+      rmcx = objcellx(n,nn) - objcentxo(nn) + xShift
+      rmcy = objcelly(n,nn) - objcentyo(nn) + yShift
     
-      rmcx = objcellx(n,nn) - objcentxo(nn)
-      rmcy = objcelly(n,nn) - objcentyo(nn)
-    
-      objcellx(n,nn) = objcentxo(nn) + (objcento(1,nn)*rmcx + objcento(2,nn)*rmcy) + lindispx
-      objcelly(n,nn) = objcentyo(nn) + (objcento(3,nn)*rmcx + objcento(4,nn)*rmcy) + lindispy
+      objcellx(n,nn) = objcentxo(nn) + (objcento(1,nn)*rmcx + objcento(2,nn)*rmcy) + lindispx - xShift
+      objcelly(n,nn) = objcentyo(nn) + (objcento(3,nn)*rmcx + objcento(4,nn)*rmcy) + lindispy - yShift
+      
+      IF(objcellx(n,nn) > x(nim))THEN
+        objcellx(n,nn) = objcellx(n,nn) - LDomainx
+        zobjcellx(n,nn) = zobjcellx(n,nn) + 1
+      ELSEIF(objcellx(n,nn) < x(1))THEN
+        objcellx(n,nn) = objcellx(n,nn) + LDomainx 
+        zobjcellx(n,nn) = zobjcellx(n,nn) - 1
+      ENDIF
+
+      IF(objcelly(n,nn) > y(njm))THEN
+        objcelly(n,nn) = objcelly(n,nn) - LDomainy
+        zobjcelly(n,nn) = zobjcelly(n,nn) + 1
+      ELSEIF(objcelly(n,nn) < y(1))THEN
+        objcelly(n,nn) = objcelly(n,nn) + LDomainy
+        zobjcelly(n,nn) = zobjcelly(n,nn) - 1
+      ENDIF
 
       CALL fd_track_single_point(objcellx(n,nn),objcelly(n,nn),objpoint_cvx(n,nn),objpoint_cvy(n,nn),ip,jp,&
                                  objpoint_interpx(:,n,nn),objpoint_interpy(:,n,nn),error)
@@ -1278,20 +1253,63 @@ ELSE
         objpoint_cvy(n,nn) = jp      
       ENDIF
 
-      rmcxr = objcellvertx(:,n,nn) - objcentxo(nn)*rone
-      rmcyr = objcellverty(:,n,nn) - objcentyo(nn)*rone
-      objcellvertx(:,n,nn) =  objcentxo(nn)*rone + (objcento(1,nn)*rmcxr + objcento(2,nn)*rmcyr) + lindispx*rone
-      objcellverty(:,n,nn) =  objcentyo(nn)*rone + (objcento(3,nn)*rmcxr + objcento(4,nn)*rmcyr) + lindispy*rone
+      DO m = 1,4
+        
+        xShift = (zobjcellvertx(m,n,nn) - zobjcentxo(nn))*LDomainx
+        yShift = (zobjcellverty(m,n,nn) - zobjcentyo(nn))*LDomainy
 
+        rmcxr = objcellvertx(m,n,nn) - objcentxo(nn) + xShift
+        rmcyr = objcellverty(m,n,nn) - objcentyo(nn) + yShift
+
+        objcellvertx(m,n,nn) =  objcentxo(nn) + (objcento(1,nn)*rmcxr + objcento(2,nn)*rmcyr) + lindispx - xshift
+        objcellverty(m,n,nn) =  objcentyo(nn) + (objcento(3,nn)*rmcxr + objcento(4,nn)*rmcyr) + lindispy - yShift
+      
+        IF(objcellvertx(m,n,nn) > x(nim))THEN
+          objcellvertx(m,n,nn) = objcellvertx(m,n,nn) - LDomainx
+          zobjcellvertx(m,n,nn) = zobjcellvertx(m,n,nn) + 1
+        ELSEIF(objcellvertx(m,n,nn) < x(1))THEN
+          objcellvertx(m,n,nn) = objcellvertx(m,n,nn) + LDomainx 
+          zobjcellvertx(m,n,nn) = zobjcellvertx(m,n,nn) - 1
+        ENDIF
+
+        IF(objcellverty(m,n,nn) > y(njm))THEN
+          objcellverty(m,n,nn) = objcellverty(m,n,nn) - LDomainy
+          zobjcellverty(m,n,nn) = zobjcellverty(m,n,nn) + 1
+        ELSEIF(objcellverty(m,n,nn) < y(1))THEN
+          objcellverty(m,n,nn) = objcellverty(m,n,nn) + LDomainy
+          zobjcellverty(m,n,nn) = zobjcellverty(m,n,nn) - 1
+        ENDIF
+
+      ENDDO
+ 
     ENDDO
    
     DO n=1,nsurfpoints(nn)
+      
+      xShift = (zsurfpointx(n,nn) - zobjcentxo(nn))*LDomainx
+      yShift = (zsurfpointy(n,nn) - zobjcentyo(nn))*LDomainy
 
-      rmcx = surfpointx(n,nn) - objcentxo(nn)
-      rmcy = surfpointy(n,nn) - objcentyo(nn)
+      rmcx = surfpointx(n,nn) - objcentxo(nn) + xShift  
+      rmcy = surfpointy(n,nn) - objcentyo(nn) + yShift
 
-      surfpointx(n,nn) = objcentxo(nn) + (objcento(1,nn)*rmcx + objcento(2,nn)*rmcy) + lindispx
-      surfpointy(n,nn) = objcentyo(nn) + (objcento(3,nn)*rmcx + objcento(4,nn)*rmcy) + lindispy
+      surfpointx(n,nn) = objcentxo(nn) + (objcento(1,nn)*rmcx + objcento(2,nn)*rmcy) + lindispx - xShift
+      surfpointy(n,nn) = objcentyo(nn) + (objcento(3,nn)*rmcx + objcento(4,nn)*rmcy) + lindispy - yShift
+
+      IF(surfpointx(n,nn) > x(nim))THEN
+        surfpointx(n,nn) = surfpointx(n,nn) - LDomainx
+        zsurfpointx(n,nn) = zsurfpointx(n,nn) + 1
+      ELSEIF(surfpointx(n,nn) < x(1))THEN
+        surfpointx(n,nn) = surfpointx(n,nn) + LDomainx 
+        zsurfpointx(n,nn) = zsurfpointx(n,nn) - 1
+      ENDIF
+
+      IF(surfpointy(n,nn) > y(njm))THEN
+        surfpointy(n,nn) = surfpointy(n,nn) - LDomainy
+        zsurfpointy(n,nn) = zsurfpointy(n,nn) + 1
+      ELSEIF(surfpointy(n,nn) < y(1))THEN
+        surfpointy(n,nn) = surfpointy(n,nn) + LDomainy
+        zsurfpointy(n,nn) = zsurfpointy(n,nn) - 1
+      ENDIF
 
     ENDDO
 
@@ -1317,7 +1335,7 @@ ENDIF
 
 !CALL fd_find_overlap
 
-dxmoved = objcentx - objcentxo
+dxmoved = objcentx - objcentxo + (zobjcentx - zobjcentxo)*LDomainx
 
 dxmeanmoved = dxmeanmoved + SUM(dxmoved) /REAL(nsphere)
 100 CONTINUE
@@ -1824,7 +1842,6 @@ USE shared_data,            ONLY : objcentx,objcentxo,up,vp,dt,objcenty,objcenty
 IMPLICIT NONE
 
 INTEGER,INTENT(IN)   :: n
-INTEGER :: j
 
 up(n) = (objcentx(n)-objcentxo(n))/dt
 vp(n) = (objcenty(n)-objcentyo(n))/dt
@@ -2146,19 +2163,31 @@ SUBROUTINE fd_calc_part_collision
 
 !--A naive collision strategy, Only for O(10^3) spherical particles  
 
-USE shared_data,      ONLY : nsphere,objcentx,objcenty,Fpq,Fpw,gravx,gravy,x,y,objradius
-USE real_parameters,  ONLY : zero,two,epsilonP,five,ten,four,real_1e2,real_1e3
+USE shared_data,      ONLY : nsphere,objcentx,objcenty,Fpq,Fpw,gravx,gravy,x,y,objradius,&
+                            xPeriodic,yPeriodic,LDomainx,LDomainy
+USE real_parameters,  ONLY : zero,two,epsilonP,five,ten,four,real_1e2,real_1e3,six
 USE precision,        ONLY : r_single
 
 IMPLICIT NONE
 
-INTEGER :: q,p,w
-REAL(KIND = r_single) :: minx,maxx,miny,maxy,g
+INTEGER :: q,p
+LOGICAL,SAVE :: Entered = .FALSE.
+REAL(KIND = r_single),SAVE :: MaxRadius,miny,maxy,minx,maxx,g
+
+IF(.NOT.Entered)THEN
+  MaxRadius = MAXVAL(objradius(1:nsphere),1)
+  minx = MINVAL(x,1)
+  maxx = MAXVAL(x,1)
+  miny = MINVAL(y,1)
+  maxy = MAXVAL(y,1)
+  g = SQRT(gravx**2+gravy**2)
+  Entered = .TRUE.
+ENDIF
 
 Fpq = zero;
 Fpw = zero;
 
-g = SQRT(gravx**2+gravy**2)
+
 
 !--Particle-particle collision
 DO p = 1,nsphere
@@ -2169,21 +2198,60 @@ DO p = 1,nsphere
   ENDDO
 ENDDO
 
-minx = MINVAL(x,1)
-maxx = MAXVAL(x,1)
-miny = MINVAL(y,1)
-maxy = MAXVAL(y,1)
+!--Periodic Colisions
+IF(xPeriodic == 1)THEN
+  DO p = 1,nsphere
+    IF(objcentx(p) > maxx - six * MaxRadius)THEN
+      DO q = 1,nsphere
+        IF(objcentx(q) < minx + six * MaxRadius)THEN
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)+LDomainx,objcenty(q),p,q,ten*epsilonP)
+        ENDIF
+      ENDDO
+    ELSEIF(objcentx(p) < minx + six * MaxRadius)THEN
+      DO q = 1,nsphere
+        IF(objcentx(q) > maxx - six * MaxRadius)THEN
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)-LDomainx,objcenty(q),p,q,ten*epsilonP)
+        ENDIF
+      ENDDO
+    ENDIF
+  ENDDO
+ENDIF
+
+!--Periodic Colisions
+IF(yPeriodic == 1)THEN
+  DO p = 1,nsphere
+    IF(objcenty(p) > maxy - six * MaxRadius)THEN
+      DO q = 1,nsphere
+        IF(objcenty(q) < miny + six * MaxRadius)THEN
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)+LDomainy,p,q,ten*epsilonP)
+        ENDIF
+      ENDDO
+    ELSEIF(objcenty(p) < miny + six * MaxRadius)THEN
+      DO q = 1,nsphere
+        IF(objcenty(q) > maxy - six * MaxRadius)THEN
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)-LDomainy,p,q,ten*epsilonP)
+        ENDIF
+      ENDDO
+    ENDIF
+  ENDDO
+ENDIF
 
 !--Particle-wall collision, (Mirror image)
 DO p = 1,nsphere 
-  !--e wall
-  Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p,real_1e2*epsilonP)
-  !--w wall
-  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p,real_1e2*epsilonP)
-  !--n wall
-  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p,real_1e2*epsilonP)
-  !--s wall
-  Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p,real_1e2*epsilonP)
+
+  IF(xPeriodic == 0)THEN
+    !--e wall
+    Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p,real_1e2*epsilonP)
+    !--w wall
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p,real_1e2*epsilonP)
+  ENDIF
+  IF(yPeriodic == 0)THEN
+    !--n wall
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p,real_1e2*epsilonP)
+    !--s wall
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p,real_1e2*epsilonP)
+  ENDIF
+
 ENDDO
 
 END SUBROUTINE fd_calc_part_collision
@@ -2386,5 +2454,160 @@ DO i=1,nsurfpoints(n)
 ENDDO
 
 END SUBROUTINE fd_create_interpmol
+
+SUBROUTINE fd_create_interpmol_nus(n)
+
+USE precision,          ONLY : r_single
+USE real_parameters,    ONLY : pi,one,two,small,half,zero
+USE shared_data,        ONLY : nnusseltpoints,nusseltpointx,nusseltpointy,objcentx,objradius,objcenty,&
+                               nusseltcentx,nusseltcenty,nusseltpoint_cvx,nusseltpoint_cvy,nusseltds,&
+                               nusseltnx,nusseltny,xc,yc,nusseltpoint_interp,nusseltinterpx,nusseltinterpy,&
+                               objbradius,x,y
+
+
+IMPLICIT NONE
+
+INTEGER,INTENT(IN)          :: n
+INTEGER                     :: i,ip1,ip,jp,is,ie,js,je,ii,jj
+REAL(KIND = r_single)       :: dtheta,theta,costheta,sintheta,vecx,vecy,dxmeanl,coeft,xp,yp
+LOGICAL                     :: failed
+
+!--Used for single tube
+  dtheta = pi / REAL(nnusseltpoints(n)-1)
+  !--Ued for tube bank
+  !dtheta = two*pi / REAL(nnusseltpoints(n)-1)
+  DO i=1,nnusseltpoints(n)
+  
+    theta = REAL(i-1)*dtheta
+    costheta = COS(pi-theta)
+    sintheta = SIN(pi-theta)
+    nusseltpointx(i,n) = objcentx(n)+(objradius(n)*objbradius(n)/ &
+                    SQRT((objradius(n)*costheta)**2+(objbradius(n)*sintheta)**2))*costheta
+    nusseltpointy(i,n) = objcenty(n)+(objradius(n)*objbradius(n)/ &
+                    SQRT((objradius(n)*costheta)**2+(objbradius(n)*sintheta)**2))*sintheta
+!    nusseltpointx(i,n) = objcentx(n)+objradius(n)*COS(theta)
+!    nusseltpointy(i,n) = objcenty(n)+objradius(n)*SIN(theta)
+  ENDDO
+
+  DO i=1,nnusseltpoints(n)-1
+      
+    ip1 = i + 1
+
+    !--Calc centre points
+    nusseltcentx(i,n) = (nusseltpointx(i,n) + nusseltpointx(ip1,n))/two
+    nusseltcenty(i,n) = (nusseltpointy(i,n) + nusseltpointy(ip1,n))/two
+
+    !--Locate the centre point on the Eul grid
+    CALL find_single_point(nusseltcentx(i,n), nusseltcenty(i,n), nusseltpoint_cvx(1,i,n),nusseltpoint_cvy(1,i,n))
+        
+    !--For single tube     
+    vecx = nusseltpointx(ip1,n) - nusseltpointx(i,n) 
+    vecy = nusseltpointy(ip1,n) - nusseltpointy(i,n) 
+    !--For bank
+    !vecx = nusseltpointx(i,n) - nusseltpointx(ip1,n) 
+    !vecy = nusseltpointy(i,n) - nusseltpointy(ip1,n) 
+             
+    nusseltds(i,n) = SQRT(vecx**2 + vecy**2)
+    IF(nusseltds(i,n) < small) THEN
+      PRINT *,'Error - Coordinates co-exits - undefined normal!'
+      PAUSE
+    ENDIF
+      
+    !--Surface element normals (outward)
+    nusseltnx(i,n) = -vecy/nusseltds(i,n)
+    nusseltny(i,n) = vecx/nusseltds(i,n)
+
+    !--Ensure the calculation is corrent
+    IF((nusseltcentx(i,n) - objcentx(n))*nusseltnx(i,n) + &
+       (nusseltcenty(i,n) - objcenty(n))*nusseltny(i,n) < zero)THEN
+
+       PRINT *,'Error - outward normal not calculated!'
+       PAUSE
+	  ENDIF
+
+  ENDDO
+
+  DO i=1,nnusseltpoints(n)-1
+      
+    coeft = one
+    dxmeanl = ( (x(nusseltpoint_cvx(1,i,n)) - x(nusseltpoint_cvx(1,i,n)-1)) + & 
+                (y(nusseltpoint_cvy(1,i,n)) - y(nusseltpoint_cvy(1,i,n)-1))   )/two
+    DO          
+      failed = .FALSE. 
+      !--first interpolation point
+      xp = nusseltcentx(i,n) + coeft * nusseltnx(i,n) * dxmeanl 
+      yp = nusseltcenty(i,n) + coeft * nusseltny(i,n) * dxmeanl 
+      
+      !--Locate the point
+      CALL find_single_point(xp,yp,ip,jp)
+        
+      !--indentify the neighbours      
+      IF(xp > xc(ip))THEN
+        is = ip
+        ie = ip + 1
+      ELSE
+        is = ip - 1
+        ie = ip
+      ENDIF
+
+      IF(yp > yc(jp))THEN
+        js = jp
+        je = jp + 1
+      ELSE
+        js = jp - 1
+        je = jp
+      ENDIF
+
+      !--Ensure all neighbours are outside of the object
+      DO ii = is,ie
+        DO jj = js,je
+          IF( ( (xc(ii) - nusseltcentx(i,n))*nusseltnx(i,n) + &
+                (yc(jj) - nusseltcenty(i,n))*nusseltny(i,n)    ) < zero )THEN
+
+             failed = .TRUE.
+             coeft = coeft + half * dxmeanl
+          ENDIF
+             
+        ENDDO
+      ENDDO
+      IF(.NOT. failed)EXIT
+    ENDDO 
+
+    nusseltpoint_interp(1:4,1,i,n) = (/is,ie,js,je/)
+    nusseltpoint_cvx(2,i,n) = ip
+    nusseltpoint_cvy(2,i,n) = jp
+    nusseltinterpx(1,i,n) = xp
+    nusseltinterpy(1,i,n) = yp
+
+    !--second point has 2 times the distance of the first point to the surface centre
+    !--Assuming a convex surface no need to check for the neighbours
+    nusseltinterpx(2,i,n) = two * nusseltinterpx(1,i,n) - nusseltcentx(i,n) 
+    nusseltinterpy(2,i,n) = two * nusseltinterpy(1,i,n) - nusseltcenty(i,n)
+    
+    CALL find_single_point(nusseltinterpx(2,i,n),nusseltinterpy(2,i,n),ip,jp)
+    
+    IF(xp > xc(ip))THEN
+      is = ip
+      ie = ip + 1
+    ELSE
+      is = ip - 1
+      ie = ip
+    ENDIF
+
+    IF(yp > yc(jp))THEN
+      js = jp
+      je = jp + 1
+    ELSE
+      js = jp - 1
+      je = jp
+    ENDIF
+
+      nusseltpoint_interp(1:4,2,i,n) = (/is,ie,js,je/)
+      nusseltpoint_cvx(3,i,n) = ip
+      nusseltpoint_cvy(3,i,n) = jp 
+       
+  ENDDO
+
+END SUBROUTINE fd_create_interpmol_nus
 
 ENDMODULE modfd_create_geom

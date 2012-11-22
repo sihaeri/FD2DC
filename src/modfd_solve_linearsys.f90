@@ -547,7 +547,7 @@ END SUBROUTINE fd_spkit_interface
 
 SUBROUTINE calc_residual(ap,as,an,aw,ae,su,phi,resor)
 
-USE shared_data,      ONLY : ni,nj,nim,njm,li,nij
+USE shared_data,      ONLY : ni,nj,nim,njm,li,nij,xPeriodic,yPeriodic
 USE precision,        ONLY : r_single
 USE real_parameters,  ONLY : zero
 IMPLICIT NONE
@@ -556,13 +556,18 @@ REAL(KIND = r_single),INTENT(IN)    :: ap(nij),as(nij),an(nij),aw(nij),ae(nij),s
 REAL(KIND = r_single),INTENT(INOUT) :: resor
 
 REAL(KIND = r_single) :: res(nij)
-INTEGER               :: ij,i
+INTEGER               :: ij,i,ije,ijw,ijn,ijs,j
 
   res = zero
   DO i=2,nim
-    DO ij=li(i)+2,li(i)+njm
-      res(ij)=su(ij)-an(ij)*phi(ij+1)-as(ij)*phi(ij-1)-&
-              ae(ij)*phi(ij+nj)-aw(ij)*phi(ij-nj)-ap(ij)*phi(ij)
+    DO j=2,njm
+      ij = li(i)+j
+      ije=ij+nj-xPeriodic*i/nim*((i-1)*nj)
+      ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
+      ijn=ij+1-yPeriodic*j/njm*(j-1)
+      ijs=ij-1+yPeriodic*Max(3-j,0)*(njm-1)
+      res(ij)=su(ij)-an(ij)*phi(ijn)-as(ij)*phi(ijs)-&
+              ae(ij)*phi(ije)-aw(ij)*phi(ijw)-ap(ij)*phi(ij)
     END DO
   END DO
 
@@ -594,17 +599,18 @@ END SUBROUTINE copy_solution
 
 SUBROUTINE fd_cooInd_create()
   
-USE shared_data,      ONLY : Arow,Acol,nj,nim,njm,lli,li,nij,Ncel,SOL,RHS,NNZ
+USE shared_data,      ONLY : Arow,Acol,nj,nim,njm,lli,li,nij,Ncel,SOL,RHS,NNZ,xPeriodic,yPeriodic
 USE precision,        ONLY : r_single
 IMPLICIT NONE
 
 INTEGER :: ia,i,j,ijn,ije,ijw,ijs,ij
 
+IF(xPeriodic == 0 .AND. yPeriodic == 0)THEN
   ia = 0
   DO i = 2,nim
     IF( i == 2)THEN
       DO j = 2,njm
-        ij = li(i) + j; ije=ij+nj; ijn=ij+1; ijw=ij-nj; ijs=ij-1
+        ij = li(i) + j; ije=ij+nj; ijn=ij+1; ijw=ij-nj; ijs=ij-1       
         IF(j == 2)THEN
           ia = ia + 1
           Arow(ia) = lli(ij); Acol(ia) = lli(ije)
@@ -695,18 +701,123 @@ INTEGER :: ia,i,j,ijn,ije,ijw,ijs,ij
     ENDIF
   ENDDO
 
+ELSEIF(xPeriodic == 1 .AND. yPeriodic == 0)THEN
+
+  ia = 0
+  DO i = 2,nim
+    DO j = 2,njm
+      ij = li(i) + j;ije=ij+nj-i/nim*((i-1)*nj);ijw=ij-nj+Max(3-i,0)*(nim-1)*nj;ijn=ij+1;ijs=ij-1     
+      IF(j == 2)THEN
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+      ELSEIF(j == njm)THEN
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+      ELSE
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+      ENDIF
+    ENDDO
+  ENDDO
+ELSEIF(xPeriodic == 0 .AND. yPeriodic == 1)THEN
+
+  ia = 0
+  DO i = 2,nim
+    IF( i == 2)THEN
+      DO j = 2,njm
+        ij = li(i) + j;ije=ij+nj;ijw=ij-nj;ijn=ij+1-j/njm*(j-1);ijs=ij-1+Max(3-j,0)*(njm-1)       
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+      ENDDO
+    ELSEIF(i == nim)THEN
+       DO j = 2,njm
+        ij = li(i) + j;ije=ij+nj;ijw=ij-nj;ijn=ij+1-j/njm*(j-1);ijs=ij-1+Max(3-j,0)*(njm-1) 
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+      ENDDO                       
+    ELSE
+       DO j = 2,njm
+        ij = li(i) + j;ije=ij+nj;ijw=ij-nj;ijn=ij+1-j/njm*(j-1);ijs=ij-1+Max(3-j,0)*(njm-1)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+        ia = ia + 1
+        Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+      ENDDO 
+    ENDIF
+  ENDDO 
+ELSEIF(xPeriodic == 1 .AND. yPeriodic == 1)THEN
+  
+  ia = 0
+  DO i = 2,nim
+    DO j = 2,njm
+      ij = li(i) + j;ije=ij+nj-i/nim*((i-1)*nj);ijw=ij-nj+Max(3-i,0)*(nim-1)*nj;ijn=ij+1-j/njm*(j-1);ijs=ij-1+Max(3-j,0)*(njm-1)
+      ia = ia + 1
+      Arow(ia) = lli(ij); Acol(ia) = lli(ije)
+      ia = ia + 1
+      Arow(ia) = lli(ij); Acol(ia) = lli(ijn)
+      ia = ia + 1
+      Arow(ia) = lli(ij); Acol(ia) = lli(ijw)
+      ia = ia + 1
+      Arow(ia) = lli(ij); Acol(ia) = lli(ijs)
+      ia = ia + 1
+      Arow(ia) = lli(ij); Acol(ia) = Arow(ia)
+    ENDDO
+  ENDDO
+
+ENDIF
+
   IF(ia /= nnz)WRITE(*,*)'fd_spkit_interface:: ia = ',ia,' ,NNZ = ',NNZ
 
 END SUBROUTINE fd_cooInd_create
 
 SUBROUTINE fd_cooVal_create(ap,as,an,aw,ae,su,phi)
   
-USE shared_data,      ONLY : Acoo,nj,nim,njm,lli,li,nij,Ncel,SOL,RHS,NNZ
+USE shared_data,      ONLY : Acoo,nj,nim,njm,lli,li,nij,Ncel,SOL,RHS,NNZ,xPeriodic,yPeriodic
 USE precision,        ONLY : r_single
 IMPLICIT NONE
 
 REAL(KIND = r_single) :: ap(nij),as(nij),an(nij),aw(nij),ae(nij),su(nij),phi(nij)
 INTEGER :: ia,i,j,ijn,ije,ijw,ijs,ij
+
+IF(xPeriodic == 0 .AND. yPeriodic == 0)THEN
 
   ia = 0
   DO i = 2,nim
@@ -808,7 +919,118 @@ INTEGER :: ia,i,j,ijn,ije,ijw,ijs,ij
       ENDDO 
     ENDIF
   ENDDO
+ELSEIF(xPeriodic == 1 .AND. yPeriodic == 0)THEN
 
+  ia = 0
+  DO i = 2,nim
+    DO j = 2,njm
+      ij = li(i) + j;ije=ij+nj-i/nim*((i-1)*nj);ijw=ij-nj+Max(3-i,0)*(nim-1)*nj;ijn=ij+1;ijs=ij-1     
+      rhs(lli(ij)) = DBLE( su(ij) )
+      sol(lli(ij)) = DBLE( phi(ij))
+      IF(j == 2)THEN
+        ia = ia + 1
+        Acoo(ia) = DBLE( ae(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( an(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( aw(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( ap(ij) )
+      ELSEIF(j == njm)THEN
+        ia = ia + 1
+        Acoo(ia) = DBLE( ae(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( aw(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( as(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( ap(ij) )
+      ELSE
+        ia = ia + 1
+        Acoo(ia) = DBLE( ae(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( an(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( aw(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( as(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( ap(ij) )
+      ENDIF
+    ENDDO
+  ENDDO 
+ELSEIF(xPeriodic == 0 .AND. yPeriodic == 1)THEN
+  
+  ia = 0
+  DO i = 2,nim
+    IF( i == 2)THEN
+      DO j = 2,njm
+        ij = li(i) + j;ije=ij+nj;ijw=ij-nj;ijn=ij+1-j/njm*(j-1);ijs=ij-1+Max(3-j,0)*(njm-1) 
+        rhs(lli(ij)) = DBLE( su(ij) )
+        sol(lli(ij)) = DBLE( phi(ij))
+        ia = ia + 1
+        Acoo(ia) = DBLE( ae(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( an(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( as(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( ap(ij) )
+      ENDDO
+    ELSEIF(i == nim)THEN
+      DO j = 2,njm
+        ij = li(i) + j;ije=ij+nj;ijw=ij-nj;ijn=ij+1-j/njm*(j-1);ijs=ij-1+Max(3-j,0)*(njm-1) 
+        rhs(lli(ij)) = DBLE( su(ij))
+        sol(lli(ij)) = DBLE(phi(ij))
+        ia = ia + 1
+        Acoo(ia) = DBLE( an(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( aw(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( as(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( ap(ij) )
+      ENDDO                       
+    ELSE
+       DO j = 2,njm
+        ij = li(i) + j;ije=ij+nj;ijw=ij-nj;ijn=ij+1-j/njm*(j-1);ijs=ij-1+Max(3-j,0)*(njm-1)
+        rhs(lli(ij)) = DBLE( su(ij) )
+        sol(lli(ij)) = DBLE( phi(ij))
+        ia = ia + 1
+        Acoo(ia) = DBLE( ae(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( an(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( aw(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( as(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( ap(ij) )
+      ENDDO 
+    ENDIF
+  ENDDO
+ELSEIF(xPeriodic == 1 .AND. yPeriodic == 1)THEN
+
+  ia = 0
+  DO i = 2,nim
+    DO j = 2,njm
+        ij = li(i) + j;ije=ij+nj-i/nim*((i-1)*nj);ijw=ij-nj+Max(3-i,0)*(nim-1)*nj;ijn=ij+1-j/njm*(j-1);ijs=ij-1+Max(3-j,0)*(njm-1)
+        rhs(lli(ij)) = DBLE( su(ij) )
+        sol(lli(ij)) = DBLE( phi(ij))
+        ia = ia + 1
+        Acoo(ia) = DBLE( ae(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( an(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( aw(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( as(ij) )
+        ia = ia + 1
+        Acoo(ia) = DBLE( ap(ij) )
+    ENDDO 
+  ENDDO
+
+ENDIF
   IF(ia /= nnz)WRITE(*,*)'fd_spkit_interface:: ia = ',ia,' ,NNZ = ',NNZ
 END SUBROUTINE fd_cooVal_create
 

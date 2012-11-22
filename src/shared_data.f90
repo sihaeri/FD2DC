@@ -6,6 +6,8 @@ USE precision,      ONLY : r_single
 INTEGER     :: solver_type
 INTEGER     :: use_GPU
 LOGICAL     :: temp_visc !--Set to true in the problem setup for temperature dependant viscosity
+
+INTEGER     :: xPeriodic,yPeriodic !--Set to 1 for periodic bc overrides all boundary conditions
 !-------------------------Part-1: INTEGERS-----------------------------------------!
 !-- ni, nj: number of grid points in x, y direction respectively (including boundaries)
 !-- nim, njm: last live cell in x, y direction
@@ -93,7 +95,9 @@ REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: celbeta,celcp,celkappa,den,den
 !-- xc, yc: (xc,yc) of each grid center point. (2..nim, 2..njm) xc(1) = x(1), xc(ni)=x(nim) same for yc
 !-- fx,fy: inerpolation factors (2..nim, 2..njm) (1,ni or nj) = 0.0
 !-- r: radius = y(i) for axi-symmetric, 1.0 otherwise
+!-- Ldomainx,Ldomainy : are the somain lengths, used for periodic boundaries 
 REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: x,y,xc,yc,fx,fy,r
+REAL(KIND = r_single)                          :: Ldomainx,Ldomainy
 
 !-- 3.4 time variables
 
@@ -193,6 +197,13 @@ REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: surfpointx,surfpointy,objcel
                                                     objfx,objfy,objru,objrv,objt,objrt,objq,&
                                                     objapu,objapv,objapt,nusseltpointx,nusseltpointy,&
                                                     localnusselt
+!--Boundary crossing book keeping for periodic boundaries, these arrays are updated once the corresponding point crosses a boundary
+!--The arrays start at zero, one is added if a point crosses the east (north) boundary and one is substracted if the point passes
+!--the west (south) boundary. Naming is similar to the name of the array with a z (zone) added at the beggining
+INTEGER,ALLOCATABLE,DIMENSION(:)                 :: zobjcentx,zobjcenty,zobjcentxo,zobjcentyo
+INTEGER,ALLOCATABLE,DIMENSION(:,:)               :: zsurfpointx,zsurfpointy,zobjcellx,zobjcelly
+INTEGER,ALLOCATABLE,DIMENSION(:,:,:)             :: zobjcellvertx,zobjcellverty
+
 INTEGER,DIMENSION(:,:),ALLOCATABLE               :: objcell_overlap
 !--Particle Collision forces, 
 !--Fpq, sum of forces on particle p due to all other particles q /= p, 

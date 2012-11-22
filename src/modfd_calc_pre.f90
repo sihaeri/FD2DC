@@ -14,7 +14,7 @@ USE modfd_set_bc,       ONLY : fd_bcpressure
 USE shared_data,        ONLY : urf,ip,p,su,apu,apv,nim,njm,&
                                xc,ni,nj,li,fx,y,r,visc,su,&
                                u,v,ae,aw,an,as,fy,yc,x,lcal,ien,&
-                               den,deno,laxis,p,dtr,nij,&
+                               den,deno,laxis,p,dtr,nij,xPeriodic,yPeriodic,&
                                gamt,sor,resor,nsw,f1,f2,ft1,ft2,dpx,dpy,&
                                ltime,ap,ipr,jpr,ltest,pp,fdsu,fdsv,&
                                dux,duy,dvx,dvy,fdsuc,fdsvc,fdsub,fdsvb,putobj,&
@@ -32,12 +32,13 @@ REAL(KIND = r_single) :: fxe,fxp,dxpe,s,d,difft,fyn,fyp,dypn,&
                          vn,sum,ppo,dpxe,dpyn,pcor !,&
                          !duxel,duxe,dvynl,dvyn,fdsuce,fdsvcn,dfyn,dfxe,c,K
 
-INTEGER               :: ij,i,j,ije,ijn,ijpref,ipar(16),debug,error
+INTEGER               :: ij,i,j,ije,ijn,ijw,ijs,ijpref,ipar(16),debug,error,xend,yend
 REAL                  :: fpar(16),aet(nij),ant(nij)
 
 debug = 0
 !--EAST CV FACES (S - AREA, VOLE - VOLUME BETWEEN P AND E)
-DO i=2,nim-1
+xend = nim+xPeriodic-1 !--Apply periodic conditions
+DO i=2,xend
   
   dxpe=xc(i+1)-xc(i)
   fxe=fx(i)
@@ -45,8 +46,8 @@ DO i=2,nim-1
 
   DO j=2,njm
     ij=li(i)+j
-    ije=ij+nj
-    !ijw=ij-nj
+    ije=ij+nj-i/nim*((i-1)*nj)
+
     s=(y(j)-y(j-1))*(r(j)+r(j-1))*half
     vole=dxpe*s
     d=(den(ije)*fxe+den(ij)*fxp)*s
@@ -60,33 +61,17 @@ DO i=2,nim-1
     dpxel=half*(dpx(ije)+dpx(ij))
     uel=u(ije)*fxe+u(ij)*fxp
     apue=apu(ije)*fxe+apu(ij)*fxp
-    !duxel=half*(dux(ije)+dux(ij))
+
     !--CELL FACE GRADIENT, VELOCITY AND MASS FLUX
     dpxe=(p(ije)-p(ij))/dxpe
-    !duxe=(u(ije)-u(ij))/dxpe
-    !dfxe=(fdsu(ije)-fdsu(ij))/dxpe
+
     pcor=apue*vole*(dpxe-dpxel)
-!    IF(uel >= pcor)THEN
-!      c = one
-!    ELSE
-!      c = zero
-!    ENDIF
-!    IF(.NOT. (ABS(u(ije)) + two*ABS(u(ij)) + ABS(u(ijw))) > zero)THEN
-!      K = zero
-!    ELSE
-!      K = ABS(dux(ij))/(ABS(u(ije)) + two*ABS(u(ij)) + ABS(u(ijw)))
-!    ENDIF
-    !Rahman correction : + dxpe/four*(apu(ij) - apu(ije))*dfxe
-    !Gu correction: - K*dxpe**2*(duxe - duxel)
-    !test correction: + apue*vole*((fdsu(ij)+fdsu(ije))/two - (fdsub(ij)+fdsub(ije))/two)
+
     ue=uel - pcor 
     
     f1(ij) = d*ue
     ft1(ij) = difft*ue
-!    IF(putobj)THEN
-!      fdsuce = fdsuc(ije)*fxe+fdsuc(ij)*fxp
-!      fdsub(ij) = fdsuce*d*apue
-!    ENDIF
+
     !--COEFFICIENTS OF P' EQUATION, AE(P) AND AW(E)
     
     ae(ij)=-d*apue*s
@@ -97,14 +82,15 @@ DO i=2,nim-1
 END DO
 
 !--NORTH CV FACES (S - AREA, VOLN - VOLUME BETWEEN P AND N)
-DO j=2,njm-1
+yend = njm+yPeriodic-1 !--Apply periodic conditions
+DO j=2,yend
   dypn=yc(j+1)-yc(j)
   fyn=fy(j)
   fyp=one-fyn
 
   DO i=2,nim
     ij=li(i)+j
-    ijn=ij+1
+    ijn=ij+1-j/njm*(j-1)
     !ijs=ij-1
 
     s=(x(i)-x(i-1))*r(j)
@@ -123,27 +109,12 @@ DO j=2,njm-1
     !dvyn=(v(ijn)-v(ij))/dypn
     !dfyn=(fdsv(ijn)-fdsv(ij))/dypn
     pcor=apvn*voln*(dpyn-dpynl)
-!    IF(vnl >= pcor)THEN
-!      c = one
-!    ELSE
-!      c = zero
-!    ENDIF
-!    IF(.NOT. (ABS(v(ijn)) + two*ABS(v(ij)) + ABS(v(ijs))) > zero)THEN
-!      K = zero
-!    ELSE
-!      K = ABS(dvy(ij))/(ABS(v(ijn)) + two*ABS(v(ij)) + ABS(v(ijs)))
-!    ENDIF
-    !Rahman correction: +dypn/four*(apv(ij) - apv(ijn))*dfyn 
-    !Gu correction: - K*dxpe**2*(dvyn - dvynl)
-    !test correction: + apue*vole*((fdsu(ij)+fdsu(ije))/two - (fdsub(ij)+fdsub(ije))/two) 
+
     vn=vnl - pcor 
     
     f2(ij)=d*vn
     ft2(ij)=difft*vn
-!    IF(putobj)THEN
-!      fdsvcn = fdsvc(ijn)*fyn+fdsvc(ij)*fyp    
-!      fdsvb(ij) = fdsvcn*d*apvn
-!    ENDIF
+
     !--COEFFICIENTS OF P' EQUATION, AN(P) AND AS(N)
 
     an(ij)=-d*apvn*s
@@ -165,7 +136,9 @@ sum=zero
 DO i=2,nim
   DO j=2,njm
     ij=li(i)+j
-    su(ij)=f1(ij-nj)-f1(ij)+f2(ij-1)-f2(ij) 
+    ijs=ij-1+yPeriodic*Max(3-j,0)*(njm-1)
+    ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
+    su(ij)=f1(ijw)-f1(ij)+f2(ijs)-f2(ij) 
     IF(putobj)THEN
       su(ij) = su(ij) +  (deno(ij) - den(ij)) *  ((x(i)-x(i-1))*(y(j)-y(j-1))*half*(r(j)+r(j-1))) /dt
     ENDIF 
@@ -260,19 +233,23 @@ ijpref=li(ipr)+jpr
 ppo=pp(ijpref)
 
 !--CORRECT EAST MASS FLUXES 
-DO i=2,nim-1
-  DO ij=li(i)+2,li(i)+njm
-    f1(ij)=f1(ij)+ae(ij)*(pp(ij+nj)-pp(ij))
-    ft1(ij)=ft1(ij)+aet(ij)*(pp(ij+nj)-pp(ij))
+DO i=2,xend
+  DO j=2,njm
+    ij = li(i) + j
+    ije=ij+nj-i/nim*((i-1)*nj)
+    f1(ij)=f1(ij)+ae(ij)*(pp(ije)-pp(ij))
+    ft1(ij)=ft1(ij)+aet(ij)*(pp(ije)-pp(ij))
   END DO
 END DO
 
 !--CORRECT NORTH MASS FLUXES 
 
 DO i=2,nim
-  DO ij=li(i)+2,li(i)+njm-1
-    f2(ij)=f2(ij)+an(ij)*(pp(ij+1)-pp(ij))
-    ft2(ij)=ft2(ij)+ant(ij)*(pp(ij+1)-pp(ij))
+  DO j=2,yend
+    ij = li(i) + j
+    ijn=ij+1-j/njm*(j-1)
+    f2(ij)=f2(ij)+an(ij)*(pp(ijn)-pp(ij))
+    ft2(ij)=ft2(ij)+ant(ij)*(pp(ijn)-pp(ij))
   END DO
 END DO
 
@@ -280,7 +257,9 @@ sum=zero
 DO i=2,nim
   DO j=2,njm
     ij=li(i)+j
-    su(ij)=f1(ij-nj)-f1(ij)+f2(ij-1)-f2(ij) 
+    ijs=ij-1+yPeriodic*Max(3-j,0)*(njm-1)
+    ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
+    su(ij)=f1(ijw)-f1(ij)+f2(ijs)-f2(ij) 
     IF(putobj)THEN
       su(ij) = su(ij) +  (deno(ij) - den(ij)) *  ((x(i)-x(i-1))*(y(j)-y(j-1))*half*(r(j)+r(j-1))) /dt
     ENDIF 
@@ -297,10 +276,15 @@ DO i=2,nim
     rp=half*(r(j)+r(j-1))
     dy=y(j)-y(j-1)
 
-    ppe=pp(ij+nj)*fx(i)+pp(ij)*(one-fx(i))
-    ppw=pp(ij)*fx(i-1)+pp(ij-nj)*(one-fx(i-1))
-    ppn=pp(ij+1)*fy(j)+pp(ij)*(one-fy(j))
-    pps=pp(ij)*fy(j-1)+pp(ij-1)*(one-fy(j-1))
+    ije=ij+nj-xPeriodic*i/nim*((i-1)*nj)
+    ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
+    ijn=ij+1-yPeriodic*j/njm*(j-1)
+    ijs=ij-1+yPeriodic*Max(3-j,0)*(njm-1)
+
+    ppe=pp(ije)*fx(i)+pp(ij)*(one-fx(i))
+    ppw=pp(ij)*fx(i-1)+pp(ijw)*(one-fx(i-1))
+    ppn=pp(ijn)*fy(j)+pp(ij)*(one-fy(j))
+    pps=pp(ij)*fy(j-1)+pp(ijs)*(one-fy(j-1))
 
     u(ij)=u(ij)-(ppe-ppw)*dy*rp*apu(ij)
     v(ij)=v(ij)-(ppn-pps)*dx*rp*apv(ij)

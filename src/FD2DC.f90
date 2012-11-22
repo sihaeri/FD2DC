@@ -10,7 +10,8 @@ USE shared_data,         ONLY : lread,itim,itst,louts,lcal,iu,iv,ip,ien,u,p,v,t,
                                 imon,jmon,slarge,sormax,ni,nj,loute,lwrite,nim,njm,nij,&
                                 x,y,xc,yc,li,f1,f2,vo,uo,to,putobj,dt,duct,filnprt,spherenum,isotherm,objtp,&
                                 nfil,nfilpoints,filpointx,filpointy,filru,filrv,calcsurfforce,&
-                                calcwalnusselt_ave,naverage_wsteps,&
+                                calcwalnusselt_ave,naverage_wsteps,xPeriodic,zsurfpointx,zsurfpointy,&
+                                zobjcellx,zobjcelly,zobjcellvertx,zobjcellverty,&
                                 localnusselt,calclocalnusselt,nusseltcentx,nusseltcenty,nnusseltpoints,&
                                 nsphere,nfil,filfirstposy,sphnprt,surfpointx,surfpointy,objcellx,objcelly,&
                                 nobjcells,nsurfpoints,objcellvertx,objcellverty,objcentu,objcentv,objcentx,&
@@ -118,8 +119,10 @@ timeloop: DO itim = itims,itime
   DO iter=1,maxit
 !    T1 = omp_get_wtime()
     IF(lcal(iu)) CALL fd_calc_mom
-    IF(lcal(iu).AND.duct) CALL fd_bcout
-    IF(lcal(iu).AND.movingmesh) CALL fd_bcout
+    IF(xPeriodic == 0)THEN
+      IF(lcal(iu).AND.duct) CALL fd_bcout
+      IF(lcal(iu).AND.movingmesh) CALL fd_bcout
+    ENDIF
     IF(lcal(ip)) CALL fd_calc_pre
     IF(lcal(ien)) CALL fd_calc_temp
     IF(temp_visc)CALL fd_update_visc
@@ -222,10 +225,11 @@ timeloop: DO itim = itims,itime
     IF((ltime.AND.MOD(itim,sphnprt)==0)) THEN
       l = l +1
       OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//filenum(l)//'_sph_v.plt',STATUS='NEW')
-      CALL fd_tecwrite_sph_v(plt_unit,nsphere,nobjcells,objcellvertx,objcellverty)
+      CALL fd_tecwrite_sph_v(plt_unit,nsphere,nobjcells,objcellvertx,objcellverty,&
+                              zobjcellx,zobjcelly,zobjcellvertx,zobjcellverty)
       CLOSE(plt_unit)
       OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//filenum(l)//'_sph_s.plt',STATUS='NEW')
-      CALL fd_tecwrite_sph_s(plt_unit,nsphere,nsurfpoints,surfpointx,surfpointy)
+      CALL fd_tecwrite_sph_s(plt_unit,nsphere,nsurfpoints,surfpointx,surfpointy,zsurfpointx,zsurfpointy)
       CLOSE(plt_unit)
     ENDIF
   ENDIF

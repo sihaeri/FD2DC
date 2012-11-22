@@ -16,7 +16,7 @@ USE shared_data,        ONLY : urf,ien,t,to,too,su,nim,njm,&
                                u,v,ae,aw,an,as,fy,yc,x,lcal,ien,&
                                deno,den,laxis,dtr,gamt,sor,resor,&
                                nsw,f1,f2,dpx,dpy,ltime,ap,ltest,celkappa,celcp,gds,&
-                               putobj,fdst,dtx,dty,apt,ft1,ft2,&
+                               putobj,fdst,dtx,dty,apt,ft1,ft2,xperiodic,yperiodic,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
                                Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,dux,dvy,p,use_GPU
@@ -27,7 +27,7 @@ USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGST
 IMPLICIT NONE
 REAL(KIND = r_single) :: urfi,fxe,fxp,dxpe,s,d,fyn,fyp,dypn,cn,&
                          ce,cp,dx,dy,rp,fuds,fcds,vol,aptt,te,tw,ts,tn
-INTEGER               :: ij,i,j,ije,ijn,ipar(16),debug,error
+INTEGER               :: ij,i,j,ije,ijn,ijs,ijw,ipar(16),debug,error,xend,yend
 REAL                  :: fpar(16)
 
 debug = 0
@@ -37,8 +37,9 @@ ap = zero
     
 urfi=one/urf(ien)
 
-!--FLUXES THROUGH INTERNAL EAST CV-FACES 
-DO i=2,nim-1
+!--FLUXES THROUGH INTERNAL EAST CV-FACES
+xend = nim+xPeriodic-1 !--Apply periodic conditions 
+DO i=2,xend
 
 !--INTERPOLATION FACTORS, DISTANCE FROM P TO E (SAME FOR ALL J)
   fxe =fx(i)
@@ -47,7 +48,7 @@ DO i=2,nim-1
 
   DO j=2,njm
     ij=li(i)+j
-    ije=ij+nj
+    ije=ij+nj-i/nim*((i-1)*nj)
 
     !--CELL FACE AREA S = DY*RE*1
 
@@ -76,7 +77,8 @@ DO i=2,nim-1
 END DO
 
 !--FLUXES THROUGH INTERNAL NORTH CV FACES 
-DO j=2,njm-1
+yend = njm+yPeriodic-1 !--Apply periodic conditions
+DO j=2,yend
 
   !--INTERPOLATION FACTORS, DISTANCE FROM P TO N (SAME FOR ALL J)
 
@@ -87,6 +89,7 @@ DO j=2,njm-1
   DO i=2,nim
     ij =li(i)+j
     ijn=ij+1
+    ijn=ij+1-j/njm*(j-1)
     !--CELL FACE AREA S = DX*RN*1
 
     s=(x(i)-x(i-1))*r(j)
@@ -225,12 +228,16 @@ DO i=2,nim
   DO j=2,njm
     dy=y(j)-y(j-1)
     ij=li(i)+j
+    ije=ij+nj-i/nim*((i-1)*nj)
+    ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
+    ijn=ij+1-j/njm*(j-1)
+    ijs=ij-1+yPeriodic*Max(3-j,0)*(njm-1)
     !--CELL-CENTER GRADIENT 
     
-    te=t(ij+nj)*fx(i)+t(ij)*(one-fx(i))
-    tw=t(ij)*fx(i-1)+t(ij-nj)*(one-fx(i-1))
-    tn=t(ij+1)*fy(j)+t(ij)*(one-fy(j))
-    ts=t(ij)*fy(j-1)+t(ij-1)*(one-fy(j-1))
+    te=t(ije)*fx(i)+t(ij)*(one-fx(i))
+    tw=t(ij)*fx(i-1)+t(ijw)*(one-fx(i-1))
+    tn=t(ijn)*fy(j)+t(ij)*(one-fy(j))
+    ts=t(ij)*fy(j-1)+t(ijs)*(one-fy(j-1))
     dtx(ij)=(te-tw)/dx
     dty(ij)=(tn-ts)/dy
 
