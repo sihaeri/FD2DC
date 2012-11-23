@@ -45,7 +45,7 @@ REAL(KIND = r_single) :: uin,vin,pin,tin,dx,dy,rp,domain_vol,rdummy
 INTEGER               :: i,j,ij,ncell,idummy,error
 !REAL(KIND = r_single),ALLOCATABLE :: volp(:,:),q(:)
 
-use_GPU = use_GPU_no
+use_GPU = use_GPU_yes
 error = OPSUCCESS
 solver_type = solver_sparsekit
 itim = 0
@@ -386,12 +386,15 @@ USE shared_data
 
 IMPLICIT NONE
 
-INTEGER :: lni,lnj,lnim,lnjm,lnij,ij,i,j,lnsphere,nn,ik,maxnobjcell,lnfil,maxnfilpoints
+INTEGER :: lni,lnj,lnim,lnjm,lnij,ij,i,j,lnsphere,nn,ik,maxnobjcell,lnfil,maxnfilpoints,lxPeriodic,&
+           lyPeriodic
 LOGICAL :: lputobj,lread_fd_geom,lstationary,lforcedmotion,lmovingmesh,&
                   lcalcsurfforce,lcalclocalnusselt,lisotherm,ltemp_visc
 IF(putobj)THEN
+  READ(sres_unit) lxPeriodic,lyPeriodic
   READ(sres_unit) itim,time,lni,lnj,lnim,lnjm,lnij
-  IF(lni /= ni .OR. lnj /= nj .OR. lnij /= nij .OR. lnim /= nim .OR. lnjm /= njm)THEN
+  IF(lni /= ni .OR. lnj /= nj .OR. lnij /= nij .OR. lnim /= nim .OR. lnjm /= njm .OR. &
+     lxPeriodic /= xPeriodic .OR. lyPeriodic /= yPeriodic)THEN
       WRITE(out_unit,*)'fd_problem_restart: restart file inconsistency.'
       STOP
   ENDIF
@@ -446,7 +449,8 @@ IF(putobj)THEN
                   (objcentxo(ij),ij=1,nsphere),(objcentyo(ij),ij=1,nsphere),(objcentvo(ij),ij=1,nsphere),&
                   (objcentuo(ij),ij=1,nsphere),(objcentomo(ij),ij=1,nsphere),(betap(ij),ij=1,nsphere),&
                   (cpp(ij),ij=1,nsphere),(kappap(ij),ij=1,nsphere),(Fpq(1,ij),ij=1,nsphere),&
-                  (Fpq(2,ij),ij=1,nsphere)
+                  (Fpq(2,ij),ij=1,nsphere),(zobjcentx(ij),ij=1,nsphere),(zobjcenty(ij),ij=1,nsphere),&
+                  (zobjcentxo(ij),ij=1,nsphere),(zobjcentyo(ij),ij=1,nsphere)
   DO nn=1,nsphere
     READ(sres_unit)(objcento(ij,nn),ij=1,4)
   ENDDO
@@ -458,12 +462,16 @@ IF(putobj)THEN
       READ(sres_unit)(surfpointx(ij,nn),ij=1,nsurfpoints(nn)),&
                       (surfpointy(ij,nn),ij=1,nsurfpoints(nn)),&
                       (surfpointxinit(ij,nn),ij=1,nsurfpoints(nn)),&
-                      (surfpointyinit(ij,nn),ij=1,nsurfpoints(nn))
+                      (surfpointyinit(ij,nn),ij=1,nsurfpoints(nn)),&
+                      (zsurfpointx(ij,nn),ij=1,nsurfpoints(nn)),&
+                      (zsurfpointy(ij,nn),ij=1,nsurfpoints(nn))
     ENDDO
   ELSE
     DO nn = 1,nsphere
       READ(sres_unit)(surfpointx(ij,nn),ij=1,nsurfpoints(nn)),&
-                      (surfpointy(ij,nn),ij=1,nsurfpoints(nn))
+                      (surfpointy(ij,nn),ij=1,nsurfpoints(nn)),&
+                      (zsurfpointx(ij,nn),ij=1,nsurfpoints(nn)),&
+                      (zsurfpointy(ij,nn),ij=1,nsurfpoints(nn))
     ENDDO
   ENDIF
 
@@ -512,28 +520,33 @@ IF(putobj)THEN
 
   maxnobjcell = MAXVAL(nobjcells(:),1)
   CALL fd_alloc_objcell_vars(alloc_create)
-  ALLOCATE(objcellx(maxnobjcell,nsphere),objcelly(maxnobjcell,nsphere),&
-           objcellvol(maxnobjcell,nsphere),objpoint_cvx(maxnobjcell,nsphere),&
+  ALLOCATE(objcellx(maxnobjcell,nsphere),objcelly(maxnobjcell,nsphere),zobjcellx(maxnobjcell,nsphere),&
+           zobjcelly(maxnobjcell,nsphere),objcellvol(maxnobjcell,nsphere),objpoint_cvx(maxnobjcell,nsphere),&
            objpoint_cvy(maxnobjcell,nsphere),objcellvertx(4,maxnobjcell,nsphere),objcellverty(4,maxnobjcell,nsphere),&
-           objpoint_interpx(2,maxnobjcell,nsphere),objpoint_interpy(2,maxnobjcell,nsphere),&
-           objcell_overlap(maxnobjcell,nsphere))
+           zobjcellvertx(4,maxnobjcell,nsphere),zobjcellverty(4,maxnobjcell,nsphere),&
+           objpoint_interpx(2,maxnobjcell,nsphere),objpoint_interpy(2,maxnobjcell,nsphere))
   objcellx = zero;objcelly = zero
   objcellvol = zero;objcellvertx = zero;objcellverty = zero
   objpoint_cvx = 0;objpoint_cvy = 0;objpoint_interpx = 0;objpoint_interpy = 0
-  objcell_overlap = 0
+  zobjcellx = 0; zobjcelly = 0
+  zobjcellvertx = 0; zobjcellverty = 0
 
   DO nn=1,nsphere
     READ(sres_unit)(objcellx(ij,nn),ij=1,nobjcells(nn)),&
                     (objcelly(ij,nn),ij=1,nobjcells(nn)),&
                     (objcellvol(ij,nn),ij=1,nobjcells(nn)),&
                     (objpoint_cvx(ij,nn),ij=1,nobjcells(nn)),&
-                    (objpoint_cvy(ij,nn),ij=1,nobjcells(nn)) !,&
-                    !(objcell_overlap(ij,nn),ij=1,nobjcells(nn))
+                    (objpoint_cvy(ij,nn),ij=1,nobjcells(nn)),&
+                    (zobjcellx(ij,nn),ij=1,nobjcells(nn)),&
+                    (zobjcelly(ij,nn),ij=1,nobjcells(nn))
+
     DO ij=1,nobjcells(nn)
       READ(sres_unit)(objcellvertx(i,ij,nn),i=1,4),&
                       (objcellverty(i,ij,nn),i=1,4),&
                       (objpoint_interpx(i,ij,nn),i=1,2),&
-                      (objpoint_interpy(i,ij,nn),i=1,2)
+                      (objpoint_interpy(i,ij,nn),i=1,2),&
+                      (zobjcellvertx(i,ij,nn),i=1,4),&
+                      (zobjcellverty(i,ij,nn),i=1,4)
     ENDDO
 
   ENDDO
@@ -1174,6 +1187,8 @@ USE parameters,     ONLY : eres_unit
 IMPLICIT NONE
 
 INTEGER       :: ij,nn,ik,i,j
+  
+  WRITE(eres_unit) xPeriodic,yPeriodic
 
   WRITE(eres_unit) itim,time,ni,nj,nim,njm,nij
 
@@ -1209,7 +1224,8 @@ INTEGER       :: ij,nn,ik,i,j
                   (objcentxo(ij),ij=1,nsphere),(objcentyo(ij),ij=1,nsphere),(objcentvo(ij),ij=1,nsphere),&
                   (objcentuo(ij),ij=1,nsphere),(objcentomo(ij),ij=1,nsphere),(betap(ij),ij=1,nsphere),&
                   (cpp(ij),ij=1,nsphere),(kappap(ij),ij=1,nsphere),(Fpq(1,ij),ij=1,nsphere),&
-                  (Fpq(2,ij),ij=1,nsphere)
+                  (Fpq(2,ij),ij=1,nsphere),(zobjcentx(ij),ij=1,nsphere),(zobjcenty(ij),ij=1,nsphere),&
+                  (zobjcentxo(ij),ij=1,nsphere),(zobjcentyo(ij),ij=1,nsphere)
   DO nn=1,nsphere
     WRITE(eres_unit)(objcento(ij,nn),ij=1,4)
   ENDDO
@@ -1219,12 +1235,16 @@ INTEGER       :: ij,nn,ik,i,j
       WRITE(eres_unit)(surfpointx(ij,nn),ij=1,nsurfpoints(nn)),&
                       (surfpointy(ij,nn),ij=1,nsurfpoints(nn)),&
                       (surfpointxinit(ij,nn),ij=1,nsurfpoints(nn)),&
-                      (surfpointyinit(ij,nn),ij=1,nsurfpoints(nn))
+                      (surfpointyinit(ij,nn),ij=1,nsurfpoints(nn)),&
+                      (zsurfpointx(ij,nn),ij=1,nsurfpoints(nn)),&
+                      (zsurfpointy(ij,nn),ij=1,nsurfpoints(nn))
     ENDDO
   ELSE
     DO nn = 1,nsphere
       WRITE(eres_unit)(surfpointx(ij,nn),ij=1,nsurfpoints(nn)),&
-                      (surfpointy(ij,nn),ij=1,nsurfpoints(nn))
+                      (surfpointy(ij,nn),ij=1,nsurfpoints(nn)),&
+                      (zsurfpointx(ij,nn),ij=1,nsurfpoints(nn)),&
+                      (zsurfpointy(ij,nn),ij=1,nsurfpoints(nn))
     ENDDO
   ENDIF
 
@@ -1274,13 +1294,17 @@ INTEGER       :: ij,nn,ik,i,j
                     (objcelly(ij,nn),ij=1,nobjcells(nn)),&
                     (objcellvol(ij,nn),ij=1,nobjcells(nn)),&
                     (objpoint_cvx(ij,nn),ij=1,nobjcells(nn)),&
-                    (objpoint_cvy(ij,nn),ij=1,nobjcells(nn)) !,&
-                    !(objcell_overlap(ij,nn),ij=1,nobjcells(nn))
+                    (objpoint_cvy(ij,nn),ij=1,nobjcells(nn)),&
+                    (zobjcellx(ij,nn),ij=1,nobjcells(nn)),&
+                    (zobjcelly(ij,nn),ij=1,nobjcells(nn))
+
     DO ij=1,nobjcells(nn)
       WRITE(eres_unit)(objcellvertx(i,ij,nn),i=1,4),&
                       (objcellverty(i,ij,nn),i=1,4),&
                       (objpoint_interpx(i,ij,nn),i=1,2),&
-                      (objpoint_interpy(i,ij,nn),i=1,2)
+                      (objpoint_interpy(i,ij,nn),i=1,2),&
+                      (zobjcellvertx(i,ij,nn),i=1,4),&
+                      (zobjcellverty(i,ij,nn),i=1,4)
     ENDDO
 
   ENDDO

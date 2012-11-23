@@ -165,9 +165,7 @@ IF(.NOT. read_fd_geom)THEN
            zobjcelly(maxnobjcell,nsphere),objcellvol(maxnobjcell,nsphere),objpoint_cvx(maxnobjcell,nsphere),&
            objpoint_cvy(maxnobjcell,nsphere),objcellvertx(4,maxnobjcell,nsphere),objcellverty(4,maxnobjcell,nsphere),&
            zobjcellvertx(4,maxnobjcell,nsphere),zobjcellverty(4,maxnobjcell,nsphere),&
-           objpoint_interpx(2,maxnobjcell,nsphere),objpoint_interpy(2,maxnobjcell,nsphere),&
-           objcell_overlap(maxnobjcell,nsphere))
-  objcell_overlap = 0
+           objpoint_interpx(2,maxnobjcell,nsphere),objpoint_interpy(2,maxnobjcell,nsphere))
   zobjcellx = 0; zobjcelly = 0
   zobjcellvertx = 0; zobjcellverty = 0
   DO n = 1,nsphere
@@ -1081,9 +1079,9 @@ IMPLICIT NONE
 
 INTEGER,INTENT(IN)    :: itr
 
-INTEGER               :: n,nn,ip,jp,error,moved,k,m,xShift,yShift
+INTEGER               :: n,nn,ip,jp,error,moved,k,m
 REAL(KIND = r_single) :: lindispx,lindispy,rmcx,rmcy,rmcyr,rmcxr,dxmoved(nsphere),&
-                          dtk
+                          dtk,xShift,yShift
 REAL(KIND = r_single),ALLOCATABLE,SAVE      :: tempFpq(:,:),tempFpw(:,:) 
 REAL(KIND = r_single),PARAMETER :: rone(4) = (/one,one,one,one/)
 INTEGER,PARAMETER               :: ione(4) = (/1,1,1,1/)
@@ -1334,7 +1332,6 @@ ELSE
 ENDIF
 
 !CALL fd_find_overlap
-
 dxmoved = objcentx - objcentxo + (zobjcentx - zobjcentxo)*LDomainx
 
 dxmeanmoved = dxmeanmoved + SUM(dxmoved) /REAL(nsphere)
@@ -1398,8 +1395,7 @@ IMPLICIT NONE
     ALLOCATE(objcellx(MaxNelem,nsphere),objcelly(MaxNelem,nsphere),&
            objcellvol(MaxNelem,nsphere),objpoint_cvx(MaxNelem,nsphere),&
            objpoint_cvy(MaxNelem,nsphere),objcellvertx(4,MaxNelem,nsphere),objcellverty(4,MaxNelem,nsphere),&
-           objpoint_interpx(2,MaxNelem,nsphere),objpoint_interpy(2,MaxNelem,nsphere),objcell_overlap(MaxNelem,nsphere)) 
-    objcell_overlap = 0
+           objpoint_interpx(2,MaxNelem,nsphere),objpoint_interpy(2,MaxNelem,nsphere)) 
     DO n = 1,nsphere
       OPEN(UNIT = 1, FILE = problem_name(1:problem_len)//'_'//filenum(n+1)//'.neu', STATUS = 'OLD',IOSTAT=ierror)
       READ(1,101),GeomName
@@ -2193,7 +2189,7 @@ Fpw = zero;
 DO p = 1,nsphere
   DO q = 1,nsphere
     IF(p /= q)THEN
-      Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q),p,q,ten*epsilonP)
+      Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q),p,q,five*epsilonP)
     ENDIF
   ENDDO
 ENDDO
@@ -2204,13 +2200,13 @@ IF(xPeriodic == 1)THEN
     IF(objcentx(p) > maxx - six * MaxRadius)THEN
       DO q = 1,nsphere
         IF(objcentx(q) < minx + six * MaxRadius)THEN
-          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)+LDomainx,objcenty(q),p,q,ten*epsilonP)
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)+LDomainx,objcenty(q),p,q,five*epsilonP)
         ENDIF
       ENDDO
     ELSEIF(objcentx(p) < minx + six * MaxRadius)THEN
       DO q = 1,nsphere
         IF(objcentx(q) > maxx - six * MaxRadius)THEN
-          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)-LDomainx,objcenty(q),p,q,ten*epsilonP)
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)-LDomainx,objcenty(q),p,q,five*epsilonP)
         ENDIF
       ENDDO
     ENDIF
@@ -2223,13 +2219,13 @@ IF(yPeriodic == 1)THEN
     IF(objcenty(p) > maxy - six * MaxRadius)THEN
       DO q = 1,nsphere
         IF(objcenty(q) < miny + six * MaxRadius)THEN
-          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)+LDomainy,p,q,ten*epsilonP)
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)+LDomainy,p,q,five*epsilonP)
         ENDIF
       ENDDO
     ELSEIF(objcenty(p) < miny + six * MaxRadius)THEN
       DO q = 1,nsphere
         IF(objcenty(q) > maxy - six * MaxRadius)THEN
-          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)-LDomainy,p,q,ten*epsilonP)
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)-LDomainy,p,q,five*epsilonP)
         ENDIF
       ENDDO
     ENDIF
@@ -2241,15 +2237,15 @@ DO p = 1,nsphere
 
   IF(xPeriodic == 0)THEN
     !--e wall
-    Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p,real_1e2*epsilonP)
+    Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p,ten*epsilonP)
     !--w wall
-    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p,real_1e2*epsilonP)
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p,ten*epsilonP)
   ENDIF
   IF(yPeriodic == 0)THEN
     !--n wall
-    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p,real_1e2*epsilonP)
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p,ten*epsilonP)
     !--s wall
-    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p,real_1e2*epsilonP)
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p,ten*epsilonP)
   ENDIF
 
 ENDDO
