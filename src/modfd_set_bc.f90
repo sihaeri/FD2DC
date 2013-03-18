@@ -168,8 +168,8 @@ SUBROUTINE fd_bctemp
 !--treatment at symmetry planes is the same as for an adiabatic
 !--wall
 USE real_parameters,ONLY: half,zero
-USE shared_data,   ONLY : ni,nim,li,t,nj,njm,visc,celkappa,y,yc,r,ap,su,xc,x,f1,duct,ae,movingmesh,&
-                          yPeriodic,xPeriodic
+USE shared_data,   ONLY : ni,nim,li,t,nj,njm,visc,celkappa,y,yc,r,ap,su,xc,x,duct,ae,movingmesh,&
+                          yPeriodic,xPeriodic,f1,celcp
 USE precision,     ONLY : r_single
 
 IMPLICIT NONE
@@ -217,7 +217,7 @@ IF(xPeriodic == 0)THEN
     DO j=2,njm
       ij=li(2)+j
       d=half*celkappa(ij)*(y(j)-y(j-1))*(r(j)+r(j-1))/(xc(2)-xc(1))
-      awc=d+f1(ij-nj)
+      awc=d+celcp(ij-nj)*f1(ij-nj)
       ap(ij)=ap(ij)+awc
       su(ij) =su(ij) +awc*t(ij-nj)
     ENDDO

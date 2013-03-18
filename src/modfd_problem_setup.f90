@@ -14,11 +14,11 @@ USE precision,              ONLY : r_single
 USE shared_data,            ONLY : solver_type,NNZ,NCel,lli,itim,time,lread,lwrite,ltest,louts,loute,ltime,&
                                    maxit,imon,jmon,ipr,jpr,sormax,slarge,alfa,minit,initFromFile,&
                                    densit,visc,gravx,gravy,beta,tref,problem_name,problem_len,lamvisc,&
-                                   ulid,tper,itst,nprt,dt,gamt,iu,iv,ip,ien,dtr,tper,f1,f2,ft1,ft2,voo,uoo,too,&
+                                   ulid,tper,itst,nprt,dt,gamt,iu,iv,ip,ien,dtr,tper,f1,f2,voo,uoo,too,&
                                    nsw,lcal,sor,resor,urf,gds,om,cpf,kappaf,nim,njm,ni,nj,calcwalnusselt,&
                                    calcwalnusselt_ave,naverage_wsteps,xPeriodic,yPeriodic,Ldomainx,Ldomainy,&
                                    li,x,y,xc,yc,fx,fy,laxis,r,nij,u,v,nsw,sor,lcal,p,t,th,tc,den,deno,dxmean,&
-                                   vo,uo,to,title,duct,flomas,flomom,f1,ft1,stationary,celbeta,celkappa,celcp,&  !--FD aspect
+                                   vo,uo,to,title,duct,flomas,flomom,f1,stationary,celbeta,celkappa,celcp,celcpo,&  !--FD aspect
                                    objcentx,objcenty,objradius,putobj,nsurfpoints,read_fd_geom,&
                                    betap,movingmesh,forcedmotion,up,vp,omp,isotherm,objqp,objbradius,&
                                    densitp,fd_urf,mcellpercv,objtp,nsphere,calcsurfforce,& !--filament
@@ -32,7 +32,7 @@ USE shared_data,            ONLY : solver_type,NNZ,NCel,lli,itim,time,lread,lwri
 
 USE modfd_set_bc,           ONLY : fd_bctime
 USE modfd_create_geom,      ONLY : fd_create_geom,fd_calc_mi,fd_calc_physprops,fd_calc_geom_volf,fd_calc_physprops,&
-                                   fd_calc_quality
+                                   fd_calc_quality,fd_init_temp
 USE modfil_create_geom,     ONLY : fil_create_geom
 USE modfd_tecwrite,         ONLY : fd_tecwrite_sph_s,fd_tecwrite_sph_v,fd_tecwrite_eul
 
@@ -45,7 +45,7 @@ REAL(KIND = r_single) :: uin,vin,pin,tin,dx,dy,rp,domain_vol,rdummy
 INTEGER               :: i,j,ij,ncell,idummy,error
 !REAL(KIND = r_single),ALLOCATABLE :: volp(:,:),q(:)
 
-use_GPU = use_GPU_yes
+use_GPU = use_GPU_no
 error = OPSUCCESS
 solver_type = solver_sparsekit
 itim = 0
@@ -301,7 +301,6 @@ ELSE
      ij=li(1)+j 
      u(ij)=ulid
      f1(ij)=half*densit*(y(j)-y(j-1))*(r(j)+r(j-1))*u(ij)
-     ft1(ij)=half*densit*(y(j)-y(j-1))*(r(j)+r(j-1))*u(ij)
      flomas=flomas+f1(ij)
      flomom=flomom+f1(ij)*u(ij)
    END DO
@@ -329,8 +328,9 @@ IF(.NOT. initFromFile)THEN
 
   den  = densit
   deno = densit
-  celbeta = beta
+  celbeta = beta*densit
   celcp = cpf
+  celcpo = cpf
   celkappa = kappaf
   lamvisc = visc
 ELSE
@@ -338,18 +338,22 @@ ELSE
     READ(init_field_unit) idummy,rdummy,idummy,idummy,idummy,idummy,idummy,&
          ((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
          ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
-         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
+         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),&
          (u(ij),ij=1,nij),(v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
          (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
          (uoo(ij),ij=1,nij),(voo(ij),ij=1,nij),(too(ij),ij=1,nij),&
          (den(ij),ij=1,nij),(deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),&
-         (celcp(ij),ij=1,nij),(celkappa(ij),ij=1,nij)
+         (celcp(ij),ij=1,nij),(celcp(ij),ij=1,nij),(celkappa(ij),ij=1,nij)
   CLOSE(init_field_unit)
 ENDIF
 
 IF(putobj)THEN
-  IF(nsphere > 0)  CALL fd_calc_physprops
+  IF(nsphere > 0)THEN
+    CALL fd_calc_physprops
+    CALL fd_init_temp(tin)
+  ENDIF
   deno = den
+  to = t
 ENDIF
 
 CALL fd_print_problem_setup
@@ -403,7 +407,7 @@ IF(putobj)THEN
 
   READ(sres_unit)((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
          ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
-         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
+         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),&
          (u(ij),ij=1,nij),&
          (v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
          (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
@@ -411,8 +415,8 @@ IF(putobj)THEN
          (dpx(ij),ij=1,nij),(dpy(ij),ij=1,nij),(dux(ij),ij=1,nij),&
          (duy(ij),ij=1,nij),(dvx(ij),ij=1,nij),(dvy(ij),ij=1,nij),&
          (dtx(ij),ij=1,nij),(dty(ij),ij=1,nij),(den(ij),ij=1,nij),&
-         (deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celcp(ij),ij=1,nij),(celkappa(ij),ij=1,nij),&
-         (fdsu(ij),ij=1,nij),(fdsv(ij),ij=1,nij),(fdsub(ij),ij=1,nij),&
+         (deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celcp(ij),ij=1,nij),(celcpo(ij),ij=1,nij),&
+         (celkappa(ij),ij=1,nij),(fdsu(ij),ij=1,nij),(fdsv(ij),ij=1,nij),(fdsub(ij),ij=1,nij),&
          (fdsvb(ij),ij=1,nij),(fdsuc(ij),ij=1,nij),(fdsvc(ij),ij=1,nij),&
          (fdst(ij),ij=1,nij),(fdstc(ij),ij=1,nij),(lamvisc(ij),ij=1,nij),&
          (fdfcu(ij),ij=1,nij),(fdfcv(ij),ij=1,nij)
@@ -607,14 +611,14 @@ IF(putobj)THEN
   ENDIF
 
 ELSE
-  READ(sres_unit) itim,time,ni,nj,nim,njm,nij
+  READ(sres_unit) itim,time,lni,lnj,lnim,lnjm,lnij
   IF(lni /= ni .OR. lnj /= nj .OR. lnij /= nij .OR. lnim /= nim .OR. lnjm /= njm)THEN
       WRITE(out_unit,*)'fd_problem_restart: restart file inconsistency.'
       STOP
   ENDIF
   READ(sres_unit)((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
       ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
-      (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
+      (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),&
       (u(ij),ij=1,nij),&
       (v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
       (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij)
@@ -757,8 +761,8 @@ SUBROUTINE fd_alloc_work_arrays(create_or_destroy)
 
 USE parameters,             ONLY : alloc_create,alloc_destroy,out_unit
 USE shared_data,            ONLY : nij,u,v,p,t,pp,uo,vo,to,uoo,voo,too,&
-                                   ap,an,as,ae,aw,su,sv,apu,apv,apt,f1,f2,ft1,ft2,dpx,dpy,&
-                                   dux,duy,dvx,dvy,dtx,dty,apt,den,deno,celbeta,celcp,celkappa,lamvisc
+                                   ap,an,as,ae,aw,su,sv,apu,apv,apt,f1,f2,dpx,dpy,&
+                                   dux,duy,dvx,dvy,dtx,dty,apt,den,deno,celbeta,celcp,celcpo,celkappa,lamvisc
 USE real_parameters,        ONLY : zero
 
 IMPLICIT NONE
@@ -767,9 +771,9 @@ INTEGER                 :: ierror
 
 IF(create_or_destroy == alloc_create)THEN
   ALLOCATE(u(nij),v(nij),t(nij),p(nij),pp(nij),to(nij),uo(nij),vo(nij),voo(nij),too(nij),uoo(nij),&
-           ap(nij),an(nij),as(nij),ae(nij),aw(nij),su(nij),sv(nij),apu(nij),apv(nij),f1(nij),f2(nij),ft1(nij),ft2(nij),&
+           ap(nij),an(nij),as(nij),ae(nij),aw(nij),su(nij),sv(nij),apu(nij),apv(nij),f1(nij),f2(nij),&
            dpx(nij),dpy(nij),dux(nij),duy(nij),dvx(nij),dvy(nij),dtx(nij),dty(nij),den(nij),deno(nij),&
-           celbeta(nij),celcp(nij),celkappa(nij),lamvisc(nij),STAT=ierror)
+           celbeta(nij),celcp(nij),celcpo(nij),celkappa(nij),lamvisc(nij),STAT=ierror)
   IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate working arrays.'
   u = zero
   v = zero
@@ -781,16 +785,16 @@ IF(create_or_destroy == alloc_create)THEN
   ap = zero;an = zero;as = zero;ae = zero;aw = zero
   su = zero;sv = zero
   apu = zero;apv = zero
-  f1 = zero;f2 = zero;ft1 = zero;ft2 = zero
+  f1 = zero;f2 = zero
   dpx = zero;dpy = zero
   dux = zero;duy = zero
   dvx = zero;dvy = zero
   dtx = zero;dty = zero
   den = zero;deno = zero
-  celbeta = zero;celcp = zero;celkappa = zero;lamvisc = zero
+  celbeta = zero;celcp = zero;celcpo = zero;celkappa = zero;lamvisc = zero
 ELSEIF(create_or_destroy == alloc_destroy)THEN
   DEALLOCATE(u,v,t,p,pp,to,uo,vo,voo,too,uoo,&
-           ap,an,as,ae,aw,su,sv,apu,apv,f1,f2,ft1,ft2,dpx,dpy,dux,duy,dvx,dvy,dtx,dty,apt,den,deno,celbeta,lamvisc)
+           ap,an,as,ae,aw,su,sv,apu,apv,f1,f2,dpx,dpy,dux,duy,dvx,dvy,dtx,dty,apt,den,deno,celbeta,lamvisc)
 ENDIF
 
 END SUBROUTINE fd_alloc_work_arrays
@@ -1194,7 +1198,7 @@ INTEGER       :: ij,nn,ik,i,j
 
   WRITE(eres_unit)((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
          ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
-         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
+         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),&
          (u(ij),ij=1,nij),&
          (v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
          (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
@@ -1202,8 +1206,8 @@ INTEGER       :: ij,nn,ik,i,j
          (dpx(ij),ij=1,nij),(dpy(ij),ij=1,nij),(dux(ij),ij=1,nij),&
          (duy(ij),ij=1,nij),(dvx(ij),ij=1,nij),(dvy(ij),ij=1,nij),&
          (dtx(ij),ij=1,nij),(dty(ij),ij=1,nij),(den(ij),ij=1,nij),&
-         (deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celcp(ij),ij=1,nij),(celkappa(ij),ij=1,nij),&
-         (fdsu(ij),ij=1,nij),(fdsv(ij),ij=1,nij),(fdsub(ij),ij=1,nij),&
+         (deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celcp(ij),ij=1,nij),(celcpo(ij),ij=1,nij),&
+         (celkappa(ij),ij=1,nij),(fdsu(ij),ij=1,nij),(fdsv(ij),ij=1,nij),(fdsub(ij),ij=1,nij),&
          (fdsvb(ij),ij=1,nij),(fdsuc(ij),ij=1,nij),(fdsvc(ij),ij=1,nij),&
          (fdst(ij),ij=1,nij),(fdstc(ij),ij=1,nij),(lamvisc(ij),ij=1,nij),&
          (fdfcu(ij),ij=1,nij),(fdfcv(ij),ij=1,nij)

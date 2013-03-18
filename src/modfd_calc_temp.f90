@@ -15,8 +15,8 @@ USE shared_data,        ONLY : urf,ien,t,to,too,su,nim,njm,&
                                xc,ni,nj,li,fx,y,r,visc,su,&
                                u,v,ae,aw,an,as,fy,yc,x,lcal,ien,&
                                deno,den,laxis,dtr,gamt,sor,resor,&
-                               nsw,f1,f2,dpx,dpy,ltime,ap,ltest,celkappa,celcp,gds,&
-                               putobj,fdst,dtx,dty,apt,ft1,ft2,xperiodic,yperiodic,&
+                               nsw,f1,f2,dpx,dpy,ltime,ap,ltest,celkappa,celcp,celcpo,gds,&
+                               putobj,fdst,dtx,dty,apt,xperiodic,yperiodic,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
                                Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,dux,dvy,p,use_GPU
@@ -26,7 +26,7 @@ USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGST
 
 IMPLICIT NONE
 REAL(KIND = r_single) :: urfi,fxe,fxp,dxpe,s,d,fyn,fyp,dypn,cn,&
-                         ce,cp,dx,dy,rp,fuds,fcds,vol,aptt,te,tw,ts,tn
+                         ce,cp,dx,dy,rp,fuds,fcds,vol,aptt,te,tw,ts,tn,cpe,cpn
 INTEGER               :: ij,i,j,ije,ijn,ijs,ijw,ipar(16),debug,error,xend,yend
 REAL                  :: fpar(16)
 
@@ -56,13 +56,14 @@ DO i=2,xend
 
     !--COEFFICIENT RESULTING FROM DIFFUSIVE FLUX
     d=(celkappa(ije)*fxe+celkappa(ij)*fxp)*s/dxpe
+    cpe = (celcp(ije)*fxe+celcp(ij)*fxp)
 
     !--EXPLICIT CONVECTIVE FLUX FOR UDS AND CDS
-    ce=MIN(ft1(ij),zero)
-    cp=MAX(ft1(ij),zero)
+    ce=MIN(f1(ij),zero)
+    cp=MAX(f1(ij),zero)
 
     fuds=cp*t(ij)+ce*t(ije)
-    fcds=ft1(ij)*(t(ije)*fxe+t(ij)*fxp)
+    fcds=cpe*f1(ij)*(t(ije)*fxe+t(ij)*fxp)
 
     !--COEFFICIENTS AE(P) AND AW(E) DUE TO UDS
 
@@ -96,13 +97,14 @@ DO j=2,yend
     
     !--COEFFICIENT RESULTING FROM DIFFUSIVE FLUX (SAME FOR U AND V)
     d=(celkappa(ijn)*fyn+celkappa(ij)*fyp)*s/dypn
+    cpn=(celcp(ijn)*fyn+celcp(ij)*fyp)
 
     !--EXPLICIT CONVECTIVE FLUXES FOR UDS AND CDS
-    cn=MIN(ft2(ij),zero)
-    cp=MAX(ft2(ij),zero)
+    cn=MIN(f2(ij),zero)
+    cp=MAX(f2(ij),zero)
 
     fuds=cp*t(ij)+cn*t(ijn)
-    fcds=ft2(ij)*(t(ijn)*fyn+t(ij)*fyp)
+    fcds=cpn*f2(ij)*(t(ijn)*fyn+t(ij)*fyp)
 
     !--COEFFICIENTS AE(P) AND AW(E) DUE TO UDS
 
@@ -129,7 +131,7 @@ DO i=2,nim
 
     !--UNSTEADY TERM CONTRIBUTION TO AP AND SU
     IF(ltime) THEN
-      aptt=celcp(ij)*deno(ij)*vol*dtr
+      aptt=celcpo(ij)*deno(ij)*vol*dtr
       su(ij)=su(ij)+(one+gamt)*aptt*to(ij)-half*gamt*aptt*too(ij)
       ap(ij)=ap(ij)+(one+half*gamt)*aptt
     ENDIF

@@ -2,7 +2,7 @@ MODULE modfd_create_geom
 
 PRIVATE
 PUBLIC :: fd_create_geom,fd_calc_sources,fd_calc_delta,find_single_point,fd_calc_mi,fd_calc_ori,fd_copy_oldvel,fd_calc_pos,&
-          fd_calc_physprops,fd_move_mesh,fd_calc_geom_volf,fd_calc_quality,fd_calculate_stats,fd_calc_part_collision
+          fd_calc_physprops,fd_move_mesh,fd_calc_geom_volf,fd_calc_quality,fd_calculate_stats,fd_calc_part_collision,fd_init_temp
 CONTAINS
 !===========================================
 SUBROUTINE fd_create_geom
@@ -795,7 +795,7 @@ SUBROUTINE fd_calc_physprops(outvolp)
 USE precision,          ONLY : r_single
 USE shared_data,        ONLY : nij,x,y,objpoint_cvx,objpoint_cvy,nsphere,nobjcells,objcellvol,den,deno,densit,&
                                xc,yc,objcellx,objcelly,li,nim,njm,densitp,objpoint_interpx,objpoint_interpy,&
-                               celbeta,beta,betap,celkappa,celcp,cpf,cpp,kappaf,kappap,lcal,ien,&
+                               celbeta,beta,betap,celkappa,celcp,celcpo,cpf,cpp,kappaf,kappap,lcal,ien,&
                                objcell_overlap,xPeriodic,yPeriodic,LDomainx,LDomainy
 USE real_parameters,    ONLY : zero,one
 IMPLICIT NONE
@@ -808,12 +808,13 @@ nim2 = nim - 1
 njm2 = njm - 1
 
 deno = den
-
 den = densit
 
+celcpo = celcp
 celcp = cpf
+
 celkappa = kappaf
-celbeta = beta
+celbeta = beta*densit
 
 DO nn = 1,nsphere
   volp = zero
@@ -852,7 +853,7 @@ DO nn = 1,nsphere
         ij=li(i)+j
         IF(volp(ij) /= zero)THEN
           den(ij) = (one - volp(ij))*densit + volp(ij)*densitp(nn)
-          celbeta(ij) = (one - volp(ij))*beta + volp(ij)*betap(nn)
+          celbeta(ij) = (one - volp(ij))*beta*densit + volp(ij)*betap(nn)*densitp(nn)
           celcp(ij) = (one - volp(ij))*cpf + volp(ij)*cpp(nn)
           celkappa(ij) = (one - volp(ij))*kappaf + volp(ij)*kappap(nn)
         ENDIF
@@ -862,6 +863,53 @@ DO nn = 1,nsphere
 ENDDO
 
 END SUBROUTINE fd_calc_physprops
+
+SUBROUTINE fd_init_temp(tin)
+
+USE precision,          ONLY : r_single
+USE shared_data,        ONLY : nij,x,y,objpoint_cvx,objpoint_cvy,nsphere,nobjcells,objcellvol,objtp,&
+                               xc,yc,objcellx,objcelly,li,nim,njm,objpoint_interpx,objpoint_interpy,&
+                               objcell_overlap,xPeriodic,yPeriodic,LDomainx,LDomainy,t
+USE real_parameters,    ONLY : zero,one
+IMPLICIT NONE
+
+INTEGER                :: j,i,n,nn,ij,ii,jj,nim2,njm2
+REAL(KIND = r_single)  :: dx,dy,del,volp(nij),xp,yp
+REAL(KIND = r_single),INTENT(IN) :: tin
+
+nim2 = nim - 1
+njm2 = njm - 1
+
+DO nn = 1,nsphere
+  volp = zero
+  DO n = 1,nobjcells(nn)
+    !IF(objcell_overlap(n,nn) == 0)THEN
+      DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
+        ii = i + xPeriodic*(MAX(2-i,0)*nim2 + MIN(nim-i,0)*nim2)
+        xp = objcellx(n,nn) + xPeriodic*(MAX(2-i,0)*LDomainx + MIN(nim-i,0)*LDomainx)
+        dx = x(ii) - x(ii-1)
+        DO j =objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
+          jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2)
+          yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
+          dy = y(jj) - y(jj-1)
+          del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx, dy)*objcellvol(n,nn)
+          ij = li(ii) + jj
+          volp(ij) = volp(ij) + del
+        ENDDO
+      ENDDO
+    !ENDIF
+  ENDDO
+  DO i=2,nim
+    DO j=2,njm
+      ij=li(i)+j
+      IF(volp(ij) /= zero)THEN
+        t(ij) = (one - volp(ij))*tin + volp(ij)*objtp(nn)
+      ENDIF
+    ENDDO
+  ENDDO   
+ENDDO
+
+END SUBROUTINE fd_init_temp
 
 SUBROUTINE fd_calc_mi
 
@@ -2161,14 +2209,14 @@ SUBROUTINE fd_calc_part_collision
 
 USE shared_data,      ONLY : nsphere,objcentx,objcenty,Fpq,Fpw,gravx,gravy,x,y,objradius,&
                             xPeriodic,yPeriodic,LDomainx,LDomainy
-USE real_parameters,  ONLY : zero,two,epsilonP,five,ten,four,real_1e2,real_1e3,six
+USE real_parameters,  ONLY : zero,two,epsilonP,five,ten,four,real_1e2,real_1e3,six,one
 USE precision,        ONLY : r_single
 
 IMPLICIT NONE
 
 INTEGER :: q,p
 LOGICAL,SAVE :: Entered = .FALSE.
-REAL(KIND = r_single),SAVE :: MaxRadius,miny,maxy,minx,maxx,g
+REAL(KIND = r_single),SAVE :: MaxRadius,miny,maxy,minx,maxx,g,factorp,factorw
 
 IF(.NOT.Entered)THEN
   MaxRadius = MAXVAL(objradius(1:nsphere),1)
@@ -2178,10 +2226,12 @@ IF(.NOT.Entered)THEN
   maxy = MAXVAL(y,1)
   g = SQRT(gravx**2+gravy**2)
   Entered = .TRUE.
+  factorp = (two)*ten
+  factorw = (five)*ten
 ENDIF
 
-Fpq = zero;
-Fpw = zero;
+Fpq = zero
+Fpw = zero
 
 
 
@@ -2189,7 +2239,7 @@ Fpw = zero;
 DO p = 1,nsphere
   DO q = 1,nsphere
     IF(p /= q)THEN
-      Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q),p,q,five*epsilonP)
+      Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q),p,q,factorp*epsilonP)
     ENDIF
   ENDDO
 ENDDO
@@ -2200,13 +2250,13 @@ IF(xPeriodic == 1)THEN
     IF(objcentx(p) > maxx - six * MaxRadius)THEN
       DO q = 1,nsphere
         IF(objcentx(q) < minx + six * MaxRadius)THEN
-          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)+LDomainx,objcenty(q),p,q,five*epsilonP)
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)+LDomainx,objcenty(q),p,q,factorp*epsilonP)
         ENDIF
       ENDDO
     ELSEIF(objcentx(p) < minx + six * MaxRadius)THEN
       DO q = 1,nsphere
         IF(objcentx(q) > maxx - six * MaxRadius)THEN
-          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)-LDomainx,objcenty(q),p,q,five*epsilonP)
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)-LDomainx,objcenty(q),p,q,factorp*epsilonP)
         ENDIF
       ENDDO
     ENDIF
@@ -2219,13 +2269,13 @@ IF(yPeriodic == 1)THEN
     IF(objcenty(p) > maxy - six * MaxRadius)THEN
       DO q = 1,nsphere
         IF(objcenty(q) < miny + six * MaxRadius)THEN
-          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)+LDomainy,p,q,five*epsilonP)
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)+LDomainy,p,q,factorp*epsilonP)
         ENDIF
       ENDDO
     ELSEIF(objcenty(p) < miny + six * MaxRadius)THEN
       DO q = 1,nsphere
         IF(objcenty(q) > maxy - six * MaxRadius)THEN
-          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)-LDomainy,p,q,five*epsilonP)
+          Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)-LDomainy,p,q,factorp*epsilonP)
         ENDIF
       ENDDO
     ENDIF
@@ -2237,15 +2287,15 @@ DO p = 1,nsphere
 
   IF(xPeriodic == 0)THEN
     !--e wall
-    Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p,ten*epsilonP)
+    Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p,factorw*epsilonP)
     !--w wall
-    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p,ten*epsilonP)
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p,factorw*epsilonP)
   ENDIF
   IF(yPeriodic == 0)THEN
     !--n wall
-    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p,ten*epsilonP)
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p,factorw*epsilonP)
     !--s wall
-    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p,ten*epsilonP)
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p,factorw*epsilonP)
   ENDIF
 
 ENDDO

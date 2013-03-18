@@ -15,7 +15,7 @@ USE shared_data,        ONLY : urf,ip,p,su,apu,apv,nim,njm,&
                                xc,ni,nj,li,fx,y,r,visc,su,&
                                u,v,ae,aw,an,as,fy,yc,x,lcal,ien,&
                                den,deno,laxis,p,dtr,nij,xPeriodic,yPeriodic,&
-                               gamt,sor,resor,nsw,f1,f2,ft1,ft2,dpx,dpy,&
+                               gamt,sor,resor,nsw,f1,f2,dpx,dpy,&
                                ltime,ap,ipr,jpr,ltest,pp,fdsu,fdsv,&
                                dux,duy,dvx,dvy,fdsuc,fdsvc,fdsub,fdsvb,putobj,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
@@ -51,7 +51,7 @@ DO i=2,xend
     s=(y(j)-y(j-1))*(r(j)+r(j-1))*half
     vole=dxpe*s
     d=(den(ije)*fxe+den(ij)*fxp)*s
-    difft=(celcp(ije)*den(ije)*fxe+celcp(ij)*den(ij)*fxp)*s 
+    
     !--INTERPOLATED CELL FACE QUANTITIES (PRESSURE GRAD., U AND 1/AP)
     !--Note: pressure gradient is interpolated midway between P and E,
     !--since the gradient calculated at cell face is second order
@@ -70,12 +70,10 @@ DO i=2,xend
     ue=uel - pcor 
     
     f1(ij) = d*ue
-    ft1(ij) = difft*ue
 
     !--COEFFICIENTS OF P' EQUATION, AE(P) AND AW(E)
     
     ae(ij)=-d*apue*s
-    aet(ij)=-difft*apue*s
     aw(ije)=ae(ij)
 
   END DO
@@ -96,7 +94,7 @@ DO j=2,yend
     s=(x(i)-x(i-1))*r(j)
     voln=s*dypn
     d=(den(ijn)*fyn+den(ij)*fyp)*s
-    difft=(celcp(ijn)*den(ijn)*fyn+celcp(ij)*den(ij)*fyp)*s
+    
     !--INTERPOLATED CELL-FACE QUANTITIES (PRESSURE GRAD., U AND 1/AP)
     dpynl=half*(dpy(ijn)+dpy(ij))
     vnl=v(ijn)*fyn+v(ij)*fyp
@@ -113,12 +111,10 @@ DO j=2,yend
     vn=vnl - pcor 
     
     f2(ij)=d*vn
-    ft2(ij)=difft*vn
-
+    
     !--COEFFICIENTS OF P' EQUATION, AN(P) AND AS(N)
 
     an(ij)=-d*apvn*s
-    ant(ij)=-difft*apvn*s
     as(ijn)=an(ij)
 
   END DO
@@ -238,7 +234,6 @@ DO i=2,xend
     ij = li(i) + j
     ije=ij+nj-i/nim*((i-1)*nj)
     f1(ij)=f1(ij)+ae(ij)*(pp(ije)-pp(ij))
-    ft1(ij)=ft1(ij)+aet(ij)*(pp(ije)-pp(ij))
   END DO
 END DO
 
@@ -249,7 +244,6 @@ DO i=2,nim
     ij = li(i) + j
     ijn=ij+1-j/njm*(j-1)
     f2(ij)=f2(ij)+an(ij)*(pp(ijn)-pp(ij))
-    ft2(ij)=ft2(ij)+ant(ij)*(pp(ijn)-pp(ij))
   END DO
 END DO
 

@@ -17,7 +17,7 @@ USE shared_data,         ONLY : lread,itim,itst,louts,lcal,iu,iv,ip,ien,u,p,v,t,
                                 nobjcells,nsurfpoints,objcellvertx,objcellverty,objcentu,objcentv,objcentx,&
                                 objcenty,stationary,th,movingmesh,dxmeanmoved,dxmean,dxmeanmovedtot,&
                                 lamvisc,temp_visc,tc,ulid,objradius,naverage_steps,calclocalnusselt_ave,objcentom,&
-                                voo,uoo,ft1,ft2,den,deno,celbeta,celcp,celkappa,too,calcwalnusselt,use_gpu
+                                voo,uoo,den,deno,celbeta,celcp,celkappa,too,calcwalnusselt,use_gpu
 USE parameters,          ONLY : out_unit,eres_unit,plt_unit,force_predict,force_correct,do_collect_stat,end_collect_stat,&
                                 use_GPU_yes
 USE modfd_set_bc,        ONLY : fd_bctime,fd_bcout
@@ -153,18 +153,20 @@ timeloop: DO itim = itims,itime
   IF(nsphere > 0)THEN
    !CALL fd_calc_surf_force(densref,0.1,1.0)
    IF(.NOT. stationary)THEN
-     DO nn = 1,nsphere
-       OPEN(1234,FILE='vel_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-       OPEN(1235,FILE='pos_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-       IF(.NOT. isotherm)THEN
-         OPEN(1236,FILE='temp_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-         WRITE(1236,*)objtp(nn)
-         CLOSE(1236)
-       ENDIF
-       WRITE(1234,*)objcentom(nn),objcentu(nn),objcentv(nn) !
-       WRITE(1235,*)objcentx(nn)-dxmeanmovedtot,objcenty(nn)
-       CLOSE(1234);CLOSE(1235)
-     ENDDO
+     IF(lwrite)THEN
+       DO nn = 1,nsphere
+         OPEN(1234,FILE='vel_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+         OPEN(1235,FILE='pos_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+         IF(.NOT. isotherm)THEN
+           OPEN(1236,FILE='temp_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+           WRITE(1236,*)objtp(nn)
+           CLOSE(1236)
+         ENDIF
+         WRITE(1234,*)objcentom(nn),objcentu(nn),objcentv(nn) !
+         WRITE(1235,*)objcentx(nn)-dxmeanmovedtot,objcenty(nn)
+         CLOSE(1234);CLOSE(1235)
+       ENDDO
+     ENDIF
      CALL fd_calc_mi
      CALL fd_calc_ori
      CALL fd_calc_pos(itim-itims+1)
@@ -222,7 +224,7 @@ timeloop: DO itim = itims,itime
     CLOSE(1234)
   ENDIF 
   IF(nsphere > 0)THEN
-    IF((ltime.AND.MOD(itim,sphnprt)==0)) THEN
+    IF((ltime.AND.MOD(itim,sphnprt)==0).AND.lwrite) THEN
       l = l +1
       OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//filenum(l)//'_sph_v.plt',STATUS='NEW')
       CALL fd_tecwrite_sph_v(plt_unit,nsphere,nobjcells,objcellvertx,objcellverty,&
@@ -315,7 +317,7 @@ ELSE
   WRITE(eres_unit) itim,time,ni,nj,nim,njm,nij,&
          ((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
          ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
-         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),(ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
+         (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),&
          (u(ij),ij=1,nij),(v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
          (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
          (uoo(ij),ij=1,nij),(voo(ij),ij=1,nij),(too(ij),ij=1,nij),&

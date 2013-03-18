@@ -217,7 +217,7 @@ DO i=2,nim
     !--BUOYANCY SOURCE CONTRIBUTION
 
     IF(lcal(ien)) THEN
-      sb=-celbeta(ij)*den(ij)*vol*(t(ij)-tref)
+      sb=-celbeta(ij)*vol*(t(ij)-tref)
       su(ij)=su(ij)+gravx*sb
       sv(ij)=sv(ij)+gravy*sb
     ENDIF
