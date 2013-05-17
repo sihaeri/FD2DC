@@ -50,8 +50,8 @@ LOGICAL,ALLOCATABLE,DIMENSION(:) :: lcal
 !--       during inner iterations for Ith variable before they are stoped 
 !-- resor(i) is the residual of the ith variable
 !-- urf(i) is the under-relaxation factor for the ith variable
-!-- gamt is the blending factor for time differencing schemes (gamt=1 -> three time levels scheme,
-!--       GAMT=0 -> Euler implicit scheme).
+!-- gamt is the order for time differencing schemes (gamt=2 -> three time levels scheme,
+!--       GAMT=1 -> Euler implicit scheme).
 !-- beta is the volumetric expansion factor for the fluid
 !-- gravx and gravy are the X and Y component of the gravity vector
 !-- gds(I) is the blending factor for UDS and CDS in the equation for
@@ -66,7 +66,8 @@ LOGICAL,ALLOCATABLE,DIMENSION(:) :: lcal
 !-- ulid is the lid velocity for the lid-driven flow, inlet velocity for duct
 !-- TPER is the oscillation period in the case of unsteady flow with oscillating lid.
 !-- om is the frequency of the oscillation for the oscillating lid case
-REAL(KIND = r_single) :: gamt,beta,gravx,gravy,sormax,slarge,alfa,om,tper,ulid
+INTEGER               :: gamt
+REAL(KIND = r_single) :: beta,gravx,gravy,sormax,slarge,alfa,om,tper,ulid
 REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: sor,resor,urf,gds
 
 !-- 3.2 flow variables
@@ -85,8 +86,8 @@ REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: sor,resor,urf,gds
 !-- celbeta, celcp, celkappa: cell values for beta cp and kappa !For implementation celbeta actually holds beta*desity
 !-- viscgamma: for temperature dependant viscosity, to be used in conjunction with temp_visc
 REAL(KIND = r_single) :: densit,visc,tref,th,tc,cpf,kappaf,viscgamma
-REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: celbeta,celcp,celcpo,celkappa,den,deno,u,v,p,pp,t,f1,f2,dpx,&
-                                                  dpy,dux,duy,dvx,dvy,dtx,dty,lamvisc
+REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: celbeta,celcp,celcpo,celcpoo,celkappa,den,deno,denoo,u,v,p,pp,t,f1,f2,dpx,&
+                                                  dpy,dux,duy,dvx,dvy,dtx,dty,lamvisc,ft1,ft2
 
 
 !-- 3.3 geometry
@@ -103,8 +104,8 @@ REAL(KIND = r_single)                          :: Ldomainx,Ldomainy
 
 !-- time: current time for unsteady calculation
 !-- dt: time step size
-!-- dtr = 1.0/dt
-REAL(KIND = r_single) :: time, dt, dtr
+!--ct1,ct2,ct3: are the coefficients for the time integrations (variable step size assumed)
+REAL(KIND = r_single) :: time, dt,dto,ct1,ct2,ct3
 
 !-- 3.5 old variables
 
@@ -282,5 +283,7 @@ INTEGER,DIMENSION(:,:,:,:),ALLOCATABLE               :: surfpoint_interp,nusselt
 
 !--Some Auxiliary arrays 
 INTEGER,ALLOCATABLE            :: celltype(:)
+
+INTEGER                        :: ndt !ndt is the numebr of time steps to get to the final velocity
 
 END MODULE shared_data

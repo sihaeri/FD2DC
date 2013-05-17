@@ -2,24 +2,24 @@ MODULE modfd_problem_Setup
 
 PRIVATE
 PUBLIC :: fd_problem_setup,fd_problem_restart,fd_copy_time_arrays,fd_print_var,fd_alloc_surfforce_arrays, fd_write_restart,&
-          fd_update_visc
+          fd_update_visc,fd_calc_timeCoefs
 CONTAINS
 !============================================
 SUBROUTINE fd_problem_setup
 
 USE real_parameters,        ONLY : zero,one,two,pi,half
-USE parameters,             ONLY : set_unit,alloc_create,nphi,grd_unit,max_char_len,solver_sparsekit,solver_sip,&
+USE parameters,             ONLY : out_unit,set_unit,alloc_create,nphi,grd_unit,max_char_len,solver_sparsekit,solver_sip,&
                                     solver_cg,solver_hypre,plt_unit,init_field_unit,use_GPU_yes,use_GPU_no,OPSUCCESS
 USE precision,              ONLY : r_single
 USE shared_data,            ONLY : solver_type,NNZ,NCel,lli,itim,time,lread,lwrite,ltest,louts,loute,ltime,&
                                    maxit,imon,jmon,ipr,jpr,sormax,slarge,alfa,minit,initFromFile,&
                                    densit,visc,gravx,gravy,beta,tref,problem_name,problem_len,lamvisc,&
-                                   ulid,tper,itst,nprt,dt,gamt,iu,iv,ip,ien,dtr,tper,f1,f2,voo,uoo,too,&
+                                   ulid,tper,itst,nprt,dt,dto,gamt,iu,iv,ip,ien,tper,f1,ft1,f2,voo,uoo,too,&
                                    nsw,lcal,sor,resor,urf,gds,om,cpf,kappaf,nim,njm,ni,nj,calcwalnusselt,&
                                    calcwalnusselt_ave,naverage_wsteps,xPeriodic,yPeriodic,Ldomainx,Ldomainy,&
-                                   li,x,y,xc,yc,fx,fy,laxis,r,nij,u,v,nsw,sor,lcal,p,t,th,tc,den,deno,dxmean,&
-                                   vo,uo,to,title,duct,flomas,flomom,f1,stationary,celbeta,celkappa,celcp,celcpo,&  !--FD aspect
-                                   objcentx,objcenty,objradius,putobj,nsurfpoints,read_fd_geom,&
+                                   li,x,y,xc,yc,fx,fy,laxis,r,nij,u,v,nsw,sor,lcal,p,t,th,tc,den,deno,denoo,dxmean,&
+                                   vo,uo,to,title,duct,flomas,flomom,f1,stationary,celbeta,celkappa,celcp,celcpo,celcpoo,&  !--FD aspect
+                                   objcentx,objcenty,objcentxo,objcentyo,objradius,putobj,nsurfpoints,read_fd_geom,&
                                    betap,movingmesh,forcedmotion,up,vp,omp,isotherm,objqp,objbradius,&
                                    densitp,fd_urf,mcellpercv,objtp,nsphere,calcsurfforce,& !--filament
                                    filgravx,filgravy,nfilpoints,nfil,densitfil,filbenrig,fillen,&
@@ -28,7 +28,7 @@ USE shared_data,            ONLY : solver_type,NNZ,NCel,lli,itim,time,lread,lwri
                                    nnusseltpoints,calclocalnusselt,deltalen,sphnprt,betap,kappap,cpp,&
                                    mpi_comm,Hypre_A,Hypre_b,Hypre_x,nprocs_mpi,myrank_mpi,& !--viscosity temperature dependance
                                    temp_visc,viscgamma,calclocalnusselt_ave,naverage_steps,&
-                                   use_GPU,arow,acol,acoo,acsr,aclc,arwc
+                                   use_GPU,arow,acol,acoo,acsr,aclc,arwc,ndt
 
 USE modfd_set_bc,           ONLY : fd_bctime
 USE modfd_create_geom,      ONLY : fd_create_geom,fd_calc_mi,fd_calc_physprops,fd_calc_geom_volf,fd_calc_physprops,&
@@ -45,7 +45,8 @@ REAL(KIND = r_single) :: uin,vin,pin,tin,dx,dy,rp,domain_vol,rdummy
 INTEGER               :: i,j,ij,ncell,idummy,error
 !REAL(KIND = r_single),ALLOCATABLE :: volp(:,:),q(:)
 
-use_GPU = use_GPU_no
+
+use_GPU = use_GPU_yes
 error = OPSUCCESS
 solver_type = solver_sparsekit
 itim = 0
@@ -63,15 +64,21 @@ IF((xPeriodic /= 0 .AND. xPeriodic /= 1) .OR. (yPeriodic /= 0 .AND. yPeriodic /=
 ENDIF
 
 IF((xPeriodic == 1 .OR. yPeriodic == 1) .AND. solver_type /= solver_sparsekit)THEN 
-  WRITE(*,*)'Periodic boundary controller only works with BiCGSTAB Solve set solver_type = solver_sparsekit.'
+  WRITE(*,*)'Periodic boundary controller only works with BiCGSTAB Solver set solver_type = solver_sparsekit.'
   STOP
 ENDIF
 
 READ(set_unit,*)lread,initFromFile,lwrite,ltest,laxis,louts,loute,ltime,duct
 READ(set_unit,*)maxit,minit,imon,jmon,ipr,jpr,sormax,slarge,alfa
 READ(set_unit,*)densit,visc,cpf,kappaf,gravx,gravy,beta,th,tc,tref
-READ(set_unit,*)uin,vin,pin,tin,ulid,tper
+READ(set_unit,*)uin,vin,pin,tin,ulid,ndt,tper
 READ(set_unit,*)itst,nprt,dt,gamt
+
+dto = dt
+IF(gamt /= 1 .AND. gamt /= 2)THEN
+  WRITE(out_unit,*)'GAMT:: Is the time integration order = 1 or 2.'
+  STOP
+ENDIF
 
 READ(set_unit,*)(lcal(i),i=1,nphi)
 READ(set_unit,*)(urf(i),i=1,nphi)
@@ -100,6 +107,8 @@ IF(putobj)THEN
                         objqp(i)
       ENDIF
       READ(set_unit,*)nsurfpoints(i),nnusseltpoints(i),mcellpercv(i)
+      objcentxo = objcentx
+      objcentyo = objcenty
     ENDDO
     IF(.NOT. lread)THEN
       CALL fd_alloc_objgeom_arrays(alloc_create,MAXVAL(nsurfpoints(:),1))
@@ -134,7 +143,6 @@ ip = 3
 ien = 4
 
 
-dtr = one/dt !--dt inverse
 om = two*pi/tper !--omega (for oscilatory lid)
 !prr = one/prm !--inverse prandtl !not needed anymore
 
@@ -292,7 +300,7 @@ ENDIF
 
 !--NORTH WALL VELOCITY (FOR LID-DRIVEN CAVITY)
 IF(ltime) THEN
-  CALL fd_bctime
+  CALL fd_bctime(0)
 ELSE
  IF(duct)THEN
    flomas=zero
@@ -301,6 +309,7 @@ ELSE
      ij=li(1)+j 
      u(ij)=ulid
      f1(ij)=half*densit*(y(j)-y(j-1))*(r(j)+r(j-1))*u(ij)
+     ft1(ij)=half*cpf*densit*(y(j)-y(j-1))*(r(j)+r(j-1))*u(ij)
      flomas=flomas+f1(ij)
      flomom=flomom+f1(ij)*u(ij)
    END DO
@@ -325,35 +334,43 @@ IF(.NOT. initFromFile)THEN
       to(ij)=tin
     END DO
   END DO
-
   den  = densit
   deno = densit
+  denoo= densit
   celbeta = beta*densit
-  celcp = cpf
-  celcpo = cpf
+  celcp = cpf*densit
+  celcpo = cpf*densit
+  celcpoo= cpf*densit
   celkappa = kappaf
   lamvisc = visc
 ELSE
   OPEN(UNIT = init_field_unit,FILE=problem_name(1:problem_len)//'.ini',STATUS='OLD',FORM='UNFORMATTED')
-    READ(init_field_unit) idummy,rdummy,idummy,idummy,idummy,idummy,idummy,&
+    READ(init_field_unit) idummy,rdummy,idummy,idummy,idummy,idummy,idummy,dto,&
          ((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
          ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
          (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),&
          (u(ij),ij=1,nij),(v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
          (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
          (uoo(ij),ij=1,nij),(voo(ij),ij=1,nij),(too(ij),ij=1,nij),&
-         (den(ij),ij=1,nij),(deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),&
-         (celcp(ij),ij=1,nij),(celcp(ij),ij=1,nij),(celkappa(ij),ij=1,nij)
+         (den(ij),ij=1,nij),(deno(ij),ij=1,nij),(denoo(ij),ij=1,nij),(celbeta(ij),ij=1,nij),&
+         (celcp(ij),ij=1,nij),(celcpo(ij),ij=1,nij),(celcpoo(ij),ij=1,nij),(celkappa(ij),ij=1,nij)
   CLOSE(init_field_unit)
 ENDIF
 
 IF(putobj)THEN
   IF(nsphere > 0)THEN
-    CALL fd_calc_physprops
+    CALL fd_calc_physprops(1)
     CALL fd_init_temp(tin)
   ENDIF
   deno = den
+  denoo = deno
+
+  celcpo  = celcp
+  celcpoo = celcpo
+
   to = t
+  too = to
+  
 ENDIF
 
 CALL fd_print_problem_setup
@@ -396,7 +413,7 @@ LOGICAL :: lputobj,lread_fd_geom,lstationary,lforcedmotion,lmovingmesh,&
                   lcalcsurfforce,lcalclocalnusselt,lisotherm,ltemp_visc
 IF(putobj)THEN
   READ(sres_unit) lxPeriodic,lyPeriodic
-  READ(sres_unit) itim,time,lni,lnj,lnim,lnjm,lnij
+  READ(sres_unit) itim,time,lni,lnj,lnim,lnjm,lnij,dto
   IF(lni /= ni .OR. lnj /= nj .OR. lnij /= nij .OR. lnim /= nim .OR. lnjm /= njm .OR. &
      lxPeriodic /= xPeriodic .OR. lyPeriodic /= yPeriodic)THEN
       WRITE(out_unit,*)'fd_problem_restart: restart file inconsistency.'
@@ -408,14 +425,16 @@ IF(putobj)THEN
   READ(sres_unit)((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
          ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
          (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),&
+         (ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
          (u(ij),ij=1,nij),&
          (v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
          (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
          (uoo(ij),ij=1,nij),(voo(ij),ij=1,nij),(too(ij),ij=1,nij),&
          (dpx(ij),ij=1,nij),(dpy(ij),ij=1,nij),(dux(ij),ij=1,nij),&
          (duy(ij),ij=1,nij),(dvx(ij),ij=1,nij),(dvy(ij),ij=1,nij),&
-         (dtx(ij),ij=1,nij),(dty(ij),ij=1,nij),(den(ij),ij=1,nij),&
-         (deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celcp(ij),ij=1,nij),(celcpo(ij),ij=1,nij),&
+         (dtx(ij),ij=1,nij),(dty(ij),ij=1,nij),(den(ij),ij=1,nij),(deno(ij),ij=1,nij),&
+         (denoo(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celcp(ij),ij=1,nij),&
+         (celcpo(ij),ij=1,nij),(celcpoo(ij),ij=1,nij),&
          (celkappa(ij),ij=1,nij),(fdsu(ij),ij=1,nij),(fdsv(ij),ij=1,nij),(fdsub(ij),ij=1,nij),&
          (fdsvb(ij),ij=1,nij),(fdsuc(ij),ij=1,nij),(fdsvc(ij),ij=1,nij),&
          (fdst(ij),ij=1,nij),(fdstc(ij),ij=1,nij),(lamvisc(ij),ij=1,nij),&
@@ -619,6 +638,7 @@ ELSE
   READ(sres_unit)((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
       ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
       (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),&
+      (ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
       (u(ij),ij=1,nij),&
       (v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
       (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij)
@@ -747,7 +767,7 @@ IF(LTIME) THEN
   WRITE(out_unit,*) '          UNSTEADY FLOW SIMULATION'
   WRITE(out_unit,*) '          ================================='
   WRITE(out_unit,*) '          TIME STEP SIZE       : ',DT
-  WRITE(out_unit,*) '          BLEND. FACTOR (3L-IE): ',GAMT
+  WRITE(out_unit,*) '          TIME STEP ORDER      : ',GAMT
   WRITE(out_unit,*) '          OSCILLATION PERIOD   : ',TPER
 ENDIF
 WRITE(out_unit,*) '  '
@@ -761,8 +781,8 @@ SUBROUTINE fd_alloc_work_arrays(create_or_destroy)
 
 USE parameters,             ONLY : alloc_create,alloc_destroy,out_unit
 USE shared_data,            ONLY : nij,u,v,p,t,pp,uo,vo,to,uoo,voo,too,&
-                                   ap,an,as,ae,aw,su,sv,apu,apv,apt,f1,f2,dpx,dpy,&
-                                   dux,duy,dvx,dvy,dtx,dty,apt,den,deno,celbeta,celcp,celcpo,celkappa,lamvisc
+                                   ap,an,as,ae,aw,su,sv,apu,apv,apt,f1,f2,ft1,ft2,dpx,dpy,&
+                                   dux,duy,dvx,dvy,dtx,dty,apt,den,deno,denoo,celbeta,celcp,celcpo,celcpoo,celkappa,lamvisc
 USE real_parameters,        ONLY : zero
 
 IMPLICIT NONE
@@ -772,8 +792,8 @@ INTEGER                 :: ierror
 IF(create_or_destroy == alloc_create)THEN
   ALLOCATE(u(nij),v(nij),t(nij),p(nij),pp(nij),to(nij),uo(nij),vo(nij),voo(nij),too(nij),uoo(nij),&
            ap(nij),an(nij),as(nij),ae(nij),aw(nij),su(nij),sv(nij),apu(nij),apv(nij),f1(nij),f2(nij),&
-           dpx(nij),dpy(nij),dux(nij),duy(nij),dvx(nij),dvy(nij),dtx(nij),dty(nij),den(nij),deno(nij),&
-           celbeta(nij),celcp(nij),celcpo(nij),celkappa(nij),lamvisc(nij),STAT=ierror)
+           ft1(nij),ft2(nij),dpx(nij),dpy(nij),dux(nij),duy(nij),dvx(nij),dvy(nij),dtx(nij),dty(nij),den(nij),deno(nij),&
+           denoo(nij),celbeta(nij),celcp(nij),celcpo(nij),celcpoo(nij),celkappa(nij),lamvisc(nij),STAT=ierror)
   IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate working arrays.'
   u = zero
   v = zero
@@ -786,15 +806,17 @@ IF(create_or_destroy == alloc_create)THEN
   su = zero;sv = zero
   apu = zero;apv = zero
   f1 = zero;f2 = zero
+  ft1 = zero;ft2 = zero
   dpx = zero;dpy = zero
   dux = zero;duy = zero
   dvx = zero;dvy = zero
   dtx = zero;dty = zero
-  den = zero;deno = zero
-  celbeta = zero;celcp = zero;celcpo = zero;celkappa = zero;lamvisc = zero
+  den = zero;deno = zero;denoo = zero
+  celbeta = zero;celcp = zero;celcpo = zero;celcpoo = zero;celkappa = zero;lamvisc = zero
 ELSEIF(create_or_destroy == alloc_destroy)THEN
   DEALLOCATE(u,v,t,p,pp,to,uo,vo,voo,too,uoo,&
-           ap,an,as,ae,aw,su,sv,apu,apv,f1,f2,dpx,dpy,dux,duy,dvx,dvy,dtx,dty,apt,den,deno,celbeta,lamvisc)
+           ap,an,as,ae,aw,su,sv,apu,apv,f1,f2,ft1,ft2,dpx,dpy,dux,duy,dvx,dvy,dtx,dty,apt,den,deno,denoo,celbeta,lamvisc,&
+           celcp,celcpo,celcpoo)
 ENDIF
 
 END SUBROUTINE fd_alloc_work_arrays
@@ -1194,19 +1216,21 @@ INTEGER       :: ij,nn,ik,i,j
   
   WRITE(eres_unit) xPeriodic,yPeriodic
 
-  WRITE(eres_unit) itim,time,ni,nj,nim,njm,nij
+  WRITE(eres_unit) itim,time,ni,nj,nim,njm,nij,dt
 
   WRITE(eres_unit)((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
          ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
          (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),&
+         (ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
          (u(ij),ij=1,nij),&
          (v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
          (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
          (uoo(ij),ij=1,nij),(voo(ij),ij=1,nij),(too(ij),ij=1,nij),&
          (dpx(ij),ij=1,nij),(dpy(ij),ij=1,nij),(dux(ij),ij=1,nij),&
          (duy(ij),ij=1,nij),(dvx(ij),ij=1,nij),(dvy(ij),ij=1,nij),&
-         (dtx(ij),ij=1,nij),(dty(ij),ij=1,nij),(den(ij),ij=1,nij),&
-         (deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celcp(ij),ij=1,nij),(celcpo(ij),ij=1,nij),&
+         (dtx(ij),ij=1,nij),(dty(ij),ij=1,nij),(den(ij),ij=1,nij),(deno(ij),ij=1,nij),&
+         (denoo(ij),ij=1,nij),(celbeta(ij),ij=1,nij),(celcp(ij),ij=1,nij),&
+         (celcpo(ij),ij=1,nij),(celcpoo(ij),ij=1,nij),&
          (celkappa(ij),ij=1,nij),(fdsu(ij),ij=1,nij),(fdsv(ij),ij=1,nij),(fdsub(ij),ij=1,nij),&
          (fdsvb(ij),ij=1,nij),(fdsuc(ij),ij=1,nij),(fdsvc(ij),ij=1,nij),&
          (fdst(ij),ij=1,nij),(fdstc(ij),ij=1,nij),(lamvisc(ij),ij=1,nij),&
@@ -1415,5 +1439,32 @@ ENDIF
 
 
 END SUBROUTINE fd_update_visc 
+
+SUBROUTINE fd_calc_timeCoefs
+
+USE shared_data,      ONLY : dt,dto,ct1,ct2,ct3,time,gamt
+USE real_parameters,  ONLY : one,two,zero
+
+IMPLICIT NONE
+
+!--If dt should be changed change it here {Begin}
+ !...
+!--{End}
+
+time = time + dt
+
+IF(gamt == 1)THEN
+  ct1 = one/dt
+  ct2 = one/dt !--This is actually -ct2 (since it goes to sources)
+  ct3 = zero
+ELSEIF(gamt == 2)THEN
+  ct1 = (two*dt + dto)/(dt*(dt+dto))
+  ct2 = (dt + dto)/(dt*dto) !--This is -ct2 (see above)
+  ct3 = -dt/(dto*(dt+dto))  !--This is -ct3
+ENDIF
+
+dto = dt
+
+END SUBROUTINE fd_calc_timeCoefs
 
 END MODULE modfd_problem_setup

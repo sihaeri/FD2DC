@@ -14,26 +14,26 @@ USE modfd_set_bc,       ONLY : fd_bcpressure
 USE shared_data,        ONLY : urf,ip,p,su,apu,apv,nim,njm,&
                                xc,ni,nj,li,fx,y,r,visc,su,&
                                u,v,ae,aw,an,as,fy,yc,x,lcal,ien,&
-                               den,deno,laxis,p,dtr,nij,xPeriodic,yPeriodic,&
-                               gamt,sor,resor,nsw,f1,f2,dpx,dpy,&
+                               den,deno,denoo,laxis,p,nij,xPeriodic,yPeriodic,&
+                               sor,resor,nsw,f1,f2,ft1,ft2,celcp,dpx,dpy,&
                                ltime,ap,ipr,jpr,ltest,pp,fdsu,fdsv,&
                                dux,duy,dvx,dvy,fdsuc,fdsvc,fdsub,fdsvb,putobj,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
-                               solver_type,rhs,sol,work,alu,jlu,ju,jw,dt,&
+                               solver_type,rhs,sol,work,alu,jlu,ju,jw,ct1,ct2,ct3,&
                                Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celcp,use_GPU
 USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual,&
                                     fd_solve_cgs2d,fd_cooVal_create
 USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGSTAB_itr,&
                                  cu_cpD2H_solDP
 IMPLICIT NONE
-REAL(KIND = r_single) :: fxe,fxp,dxpe,s,d,difft,fyn,fyp,dypn,&
+REAL(KIND = r_single) :: fxe,fxp,dxpe,s,d,fyn,fyp,dypn,&
                          dx,dy,rp,ppe,ppw,ppn,pps,dpxel,&
                          uel,apue,ue,vole,voln,dpynl,vnl,apvn,&
-                         vn,sum,ppo,dpxe,dpyn,pcor !,&
+                         vn,sum,ppo,dpxe,dpyn,pcor,aet(nij),ant(nij),difft !,&
                          !duxel,duxe,dvynl,dvyn,fdsuce,fdsvcn,dfyn,dfxe,c,K
 
 INTEGER               :: ij,i,j,ije,ijn,ijw,ijs,ijpref,ipar(16),debug,error,xend,yend
-REAL                  :: fpar(16),aet(nij),ant(nij)
+REAL                  :: fpar(16)
 
 debug = 0
 !--EAST CV FACES (S - AREA, VOLE - VOLUME BETWEEN P AND E)
@@ -51,7 +51,7 @@ DO i=2,xend
     s=(y(j)-y(j-1))*(r(j)+r(j-1))*half
     vole=dxpe*s
     d=(den(ije)*fxe+den(ij)*fxp)*s
-    
+    difft=(celcp(ije)*fxe+celcp(ij)*fxp)*s ! celcp contains both cp and den
     !--INTERPOLATED CELL FACE QUANTITIES (PRESSURE GRAD., U AND 1/AP)
     !--Note: pressure gradient is interpolated midway between P and E,
     !--since the gradient calculated at cell face is second order
@@ -70,10 +70,11 @@ DO i=2,xend
     ue=uel - pcor 
     
     f1(ij) = d*ue
-
+    ft1(ij)= difft*ue
     !--COEFFICIENTS OF P' EQUATION, AE(P) AND AW(E)
     
     ae(ij)=-d*apue*s
+    aet(ij)=-difft*apue*s
     aw(ije)=ae(ij)
 
   END DO
@@ -94,7 +95,7 @@ DO j=2,yend
     s=(x(i)-x(i-1))*r(j)
     voln=s*dypn
     d=(den(ijn)*fyn+den(ij)*fyp)*s
-    
+    difft=(celcp(ijn)*fyn+celcp(ij)*fyp)*s
     !--INTERPOLATED CELL-FACE QUANTITIES (PRESSURE GRAD., U AND 1/AP)
     dpynl=half*(dpy(ijn)+dpy(ij))
     vnl=v(ijn)*fyn+v(ij)*fyp
@@ -111,10 +112,11 @@ DO j=2,yend
     vn=vnl - pcor 
     
     f2(ij)=d*vn
-    
+    ft2(ij)=difft*vn
     !--COEFFICIENTS OF P' EQUATION, AN(P) AND AS(N)
 
     an(ij)=-d*apvn*s
+    ant(ij)=-difft*apvn*s
     as(ijn)=an(ij)
 
   END DO
@@ -136,7 +138,7 @@ DO i=2,nim
     ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
     su(ij)=f1(ijw)-f1(ij)+f2(ijs)-f2(ij) 
     IF(putobj)THEN
-      su(ij) = su(ij) +  (deno(ij) - den(ij)) *  ((x(i)-x(i-1))*(y(j)-y(j-1))*half*(r(j)+r(j-1))) /dt
+      su(ij) = su(ij) + (ct3*denoo(ij) + ct2*deno(ij) - ct1*den(ij)) *  ((x(i)-x(i-1))*(y(j)-y(j-1))*half*(r(j)+r(j-1)))
     ENDIF 
     ap(ij)=-(ae(ij)+aw(ij)+an(ij)+as(ij))
     sum=sum+su(ij)
@@ -170,9 +172,14 @@ IF(solver_type == solver_sparsekit)THEN
     CALL copy_solution(pp,sol)
 
     100 CONTINUE
-    IF(error /= OPSUCCESS .OR. error == SOLVER_FAILED)THEN
-      WRITE(*,*)'GPU--solver problem.'
+    IF(error == SOLVER_FAILED)THEN
+      WRITE(*,*)'GPU--Pressure solver failed to find solution.'
+!      PAUSE
+!      STOP
+    ELSEIF(error /= OPSUCCESS)THEN
+      WRITE(*,*)'GPU--Pressure solver problem in CUDA operations.'
       PAUSE
+      STOP
     ENDIF
   ELSE
       
@@ -234,6 +241,7 @@ DO i=2,xend
     ij = li(i) + j
     ije=ij+nj-i/nim*((i-1)*nj)
     f1(ij)=f1(ij)+ae(ij)*(pp(ije)-pp(ij))
+    ft1(ij)=ft1(ij)+aet(ij)*(pp(ije)-pp(ij))
   END DO
 END DO
 
@@ -244,6 +252,7 @@ DO i=2,nim
     ij = li(i) + j
     ijn=ij+1-j/njm*(j-1)
     f2(ij)=f2(ij)+an(ij)*(pp(ijn)-pp(ij))
+    ft2(ij)=ft2(ij)+ant(ij)*(pp(ijn)-pp(ij))
   END DO
 END DO
 
@@ -255,7 +264,7 @@ DO i=2,nim
     ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
     su(ij)=f1(ijw)-f1(ij)+f2(ijs)-f2(ij) 
     IF(putobj)THEN
-      su(ij) = su(ij) +  (deno(ij) - den(ij)) *  ((x(i)-x(i-1))*(y(j)-y(j-1))*half*(r(j)+r(j-1))) /dt
+      su(ij) = su(ij) +  (ct3*denoo(ij) + ct2*deno(ij) - ct1*den(ij)) *  ((x(i)-x(i-1))*(y(j)-y(j-1))*half*(r(j)+r(j-1)))
     ENDIF 
     sum=sum+ABS(su(ij))
   END DO

@@ -292,7 +292,7 @@ INTEGER,INTENT(OUT)               :: n_called !-- current cyl
 
 INTEGER                     :: i,j,k,myind(4),myind2(4,2)
 REAL(KIND = r_single)       :: vandermonde(4,4),phiarr(4,1),coefts(4,1),detmt,dtdn
-REAL(KIND = r_single)       :: tempi(2),temps,extr_fact,hh,aspratio,area
+REAL(KIND = r_single)       :: tempi(2),temps,extr_fact,hh,aspratio
 INTEGER,SAVE                :: n_entered = 0
 
 n_entered = n_entered + 1

@@ -8,14 +8,14 @@ SUBROUTINE fd_calc_temp
 !--Best to solve enthalpy, this is not very stable, but for now ....
 USE parameters,         ONLY : out_unit,solver_sparsekit,solver_sip,solver_cg,solver_hypre,use_GPU_yes,OPSUCCESS,SOLVER_DONE,&
                                SOLVER_FAILED
-USE real_parameters,    ONLY : one,zero,half
+USE real_parameters,    ONLY : one,zero,half,two,small,betam
 USE precision,          ONLY : r_single
 USE modfd_set_bc,       ONLY : fd_bctemp
 USE shared_data,        ONLY : urf,ien,t,to,too,su,nim,njm,&
                                xc,ni,nj,li,fx,y,r,visc,su,&
                                u,v,ae,aw,an,as,fy,yc,x,lcal,ien,&
-                               deno,den,laxis,dtr,gamt,sor,resor,&
-                               nsw,f1,f2,dpx,dpy,ltime,ap,ltest,celkappa,celcp,celcpo,gds,&
+                               denoo,deno,den,laxis,sor,resor,ct1,ct2,ct3,&
+                               nsw,ft1,ft2,dpx,dpy,ltime,ap,ltest,celkappa,celcp,celcpo,celcpoo,gds,&
                                putobj,fdst,dtx,dty,apt,xperiodic,yperiodic,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
@@ -26,8 +26,9 @@ USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGST
 
 IMPLICIT NONE
 REAL(KIND = r_single) :: urfi,fxe,fxp,dxpe,s,d,fyn,fyp,dypn,cn,&
-                         ce,cp,dx,dy,rp,fuds,fcds,vol,aptt,te,tw,ts,tn,cpe,cpn
-INTEGER               :: ij,i,j,ije,ijn,ijs,ijw,ipar(16),debug,error,xend,yend
+                         ce,cp,dx,dy,rp,fuds,fcds,vol,aptt,aptto,apttoo,te,tw,ts,tn,&
+                         phic,phid,phict,phif,phifcd,fg,dphi,ddphi
+INTEGER               :: ij,i,j,ije,ijn,ijs,ijw,ipar(16),debug,error,xend,yend,ic,ii,jj
 REAL                  :: fpar(16)
 
 debug = 0
@@ -56,14 +57,64 @@ DO i=2,xend
 
     !--COEFFICIENT RESULTING FROM DIFFUSIVE FLUX
     d=(celkappa(ije)*fxe+celkappa(ij)*fxp)*s/dxpe
-    cpe = (celcp(ije)*fxe+celcp(ij)*fxp)
 
     !--EXPLICIT CONVECTIVE FLUX FOR UDS AND CDS
-    ce=MIN(f1(ij),zero)
-    cp=MAX(f1(ij),zero)
+    ce=MIN(ft1(ij),zero)
+    cp=MAX(ft1(ij),zero)
 
     fuds=cp*t(ij)+ce*t(ije)
-    fcds=cpe*f1(ij)*(t(ije)*fxe+t(ij)*fxp)
+
+    IF( ft1(ij) >= zero )THEN
+      
+      ic    = ij 
+      ii    = i
+      phic  = t(ij)
+      phid  = t(ije)
+            
+      dphi  = phid - phic
+      
+      ddphi = two * dtx(ic) * dxpe 
+      phiCt = one - dphi/(ddphi+small)
+
+    ELSE
+      
+      ic    = ije
+      ii    = i+1
+      phic  = t(ije)
+      phid  = t(ij)
+      
+      dPhi  = phid - phic
+     
+      ddPhi = - two * dtx(ic) * dxpe
+      phict = one - dphi/(ddphi+Small)
+
+    ENDIF
+
+    phifcd = t(ije)*fxe+t(ij)*fxp
+
+    IF( phict <= zero .OR. phict >= one )THEN       ! Upwind
+                                                      
+      phif = phic                              
+                                                       
+    ELSEIF( betam <= phict .AND. phict < one )THEN  ! select CDS
+                                                       
+      phif = phifcd                              
+                                                       
+    ELSEIF( zero < phict .AND. phict < betam )then  ! select gamma
+                                                       
+      fg = phict / betam                           
+      phif = fg*phifcd + (one-fg)*phic           
+   
+    ENDIF
+!    IF( phict <= zero .OR. phict >= one )THEN       ! Upwind
+!      phif = phic
+!    ELSEIF(  phict <= half )THEN  ! Second order Upwind 
+!      phif = phic + dtx(ic)*(x(i) - xc(ii)) 
+!    ELSE  ! Central  
+!      phif = phifcd                                          
+!    ENDIF
+
+    fcds=ft1(ij)*phif
 
     !--COEFFICIENTS AE(P) AND AW(E) DUE TO UDS
 
@@ -91,20 +142,71 @@ DO j=2,yend
     ij =li(i)+j
     ijn=ij+1
     ijn=ij+1-j/njm*(j-1)
+
     !--CELL FACE AREA S = DX*RN*1
 
     s=(x(i)-x(i-1))*r(j)
     
     !--COEFFICIENT RESULTING FROM DIFFUSIVE FLUX (SAME FOR U AND V)
     d=(celkappa(ijn)*fyn+celkappa(ij)*fyp)*s/dypn
-    cpn=(celcp(ijn)*fyn+celcp(ij)*fyp)
 
     !--EXPLICIT CONVECTIVE FLUXES FOR UDS AND CDS
-    cn=MIN(f2(ij),zero)
-    cp=MAX(f2(ij),zero)
+    cn=MIN(ft2(ij),zero)
+    cp=MAX(ft2(ij),zero)
 
     fuds=cp*t(ij)+cn*t(ijn)
-    fcds=cpn*f2(ij)*(t(ijn)*fyn+t(ij)*fyp)
+
+    IF( ft2(ij) >= zero )THEN
+      
+      ic    = ij
+      jj    = j
+      phic  = t(ij)
+      phid  = t(ijn)
+
+      dphi  = phid - phic
+      
+      ddphi = two * dty(ij) * dypn 
+      phiCt = one - dphi/(ddphi+small)
+
+    ELSE
+      
+      ic    = ijn
+      jj    = j+1
+      phic  = t(ijn)
+      phid  = t(ij)
+
+      dPhi  = phid - phic
+     
+      ddPhi = - two * dty(ijn) * dypn
+      phict = one - dphi/(ddphi+small)
+
+    ENDIF
+
+    phifcd = t(ijn)*fyn+t(ij)*fyp
+
+    IF( phict <= zero .or. phict >= one )THEN       ! Upwind
+                                                      
+      phif = phic                              
+                                                       
+    ELSEIF( betam <= phict .AND. phict < one )THEN  ! select CDS
+                                                       
+      phif = phifcd                              
+                                                       
+    ELSEIF( zero < phict .AND. phict < betam )then  ! select gamma
+                                                       
+      fg = phict / betam                           
+      phif = fg*phifcd + (one-fg)*phic           
+   
+    ENDIF
+!    IF( phict <= zero .OR. phict >= one )THEN       ! Upwind
+!      phif = phic
+!    ELSEIF(  phict <= half )THEN  ! Second order Upwind 
+!      phif = phic + dty(ic)*(y(j) - yc(jj)) 
+!    ELSE  ! Central  
+!      phif = phifcd                                          
+!    ENDIF
+
+    fcds=ft2(ij)*phif
 
     !--COEFFICIENTS AE(P) AND AW(E) DUE TO UDS
 
@@ -131,9 +233,12 @@ DO i=2,nim
 
     !--UNSTEADY TERM CONTRIBUTION TO AP AND SU
     IF(ltime) THEN
-      aptt=celcpo(ij)*deno(ij)*vol*dtr
-      su(ij)=su(ij)+(one+gamt)*aptt*to(ij)-half*gamt*aptt*too(ij)
-      ap(ij)=ap(ij)+(one+half*gamt)*aptt
+      apttoo=celcp(ij)*vol*ct3
+      aptto =celcp(ij)*vol*ct2
+      aptt  =celcp(ij)*vol*ct1
+      
+      su(ij)=su(ij)+aptto*to(ij)+apttoo*too(ij)
+      ap(ij)=ap(ij)+aptt
     ENDIF
 
     IF(putobj)THEN
@@ -176,9 +281,14 @@ IF(solver_type == solver_sparsekit)THEN
     CALL copy_solution(t,sol)
 
     100 CONTINUE
-    IF(error /= OPSUCCESS .OR. error == SOLVER_FAILED)THEN
-      WRITE(*,*)'GPU--solver problem.'
+    IF(error == SOLVER_FAILED)THEN
+     WRITE(*,*)'GPU--Temperature solver failed to find solution.'
+!      PAUSE
+!      STOP
+    ELSEIF(error /= OPSUCCESS)THEN
+      WRITE(*,*)'GPU--Temperature solver problem in CUDA operations.'
       PAUSE
+      STOP
     ENDIF
   ELSE
     

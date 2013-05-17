@@ -21,6 +21,7 @@ INTEGER,PARAMETER       :: alloc_create = 1
 INTEGER,PARAMETER       :: alloc_destroy = alloc_create+1
 INTEGER,PARAMETER       :: max_len_tecline  = 32000
 
+INTEGER,PARAMETER       :: no_force = -1
 INTEGER,PARAMETER       :: force_predict = 1
 INTEGER,PARAMETER       :: force_correct = force_predict + 1
 
@@ -43,4 +44,6 @@ INTEGER,PARAMETER       :: SOLVER_FAILED = OPERROR-1
 INTEGER,PARAMETER       :: BCG_PTR_NOT_INITIALIZED=SOLVER_FAILED-1
 INTEGER,PARAMETER       :: OPSUCCESS = 0
 INTEGER,PARAMETER       :: SOLVER_DONE = 1
+
+INTEGER,PARAMETER       :: OUTER_ITR_DONE = -1
 END MODULE parameters

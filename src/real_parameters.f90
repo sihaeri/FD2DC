@@ -90,6 +90,7 @@ REAL(KIND=r_single), PARAMETER :: foursqrtthree = four * sqrtthree         !--No
                                                                            !--triangle quality
 REAL(KIND=r_single), PARAMETER :: epsilonP = two*real_1e6
 REAL(KIND=r_single), PARAMETER :: distfactor = three
+REAL(KIND=r_single), PARAMETER :: betam = tenth
 !
 ! use for setting mass flux on aentwsb (update_iflux) and switching signs on fluxes in update_<<boundary>> subroutines
 

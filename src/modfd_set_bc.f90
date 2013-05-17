@@ -5,13 +5,22 @@ PUBLIC :: fd_bctime,fd_bcuv,fd_bcpressure,fd_bctemp,fd_bcout,fd_calc_bcuv_grad
 
 CONTAINS
 !====================================================
-SUBROUTINE fd_bctime
+SUBROUTINE fd_bctime(nt)
 
-USE shared_data,  ONLY : nim,li,nj,om,time,ulid,u,flomas,flomom,densit,f1,y,r,duct,njm,ulid
+USE precision,    ONLY : r_single
+USE shared_data,  ONLY : nim,li,nj,om,time,ulid,u,flomas,flomom,densit,f1,y,r,duct,njm,ulid,ndt,ft1,cpf,ft1
 USE real_parameters, ONLY : zero,one,half
 
 IMPLICIT NONE
+INTEGER,INTENT(IN)   :: nt
 INTEGER             :: i,ij,j
+REAL(KIND = r_single):: fact,dummy
+
+IF(ndt>0)THEN
+  fact = tanh(REAL(nt,r_single)/REAL(ndt,r_single))
+ELSE
+  fact=one
+ENDIF
 
 IF(duct)THEN
   flomas=zero
@@ -20,6 +29,7 @@ IF(duct)THEN
     ij=li(1)+j 
     u(ij)=ulid
     f1(ij)=half*densit*(y(j)-y(j-1))*(r(j)+r(j-1))*u(ij)
+    ft1(ij)=half*cpf*densit*(y(j)-y(j-1))*(r(j)+r(j-1))*u(ij)
     flomas=flomas+f1(ij)
     flomom=flomom+f1(ij)*u(ij)
   END DO
@@ -169,7 +179,7 @@ SUBROUTINE fd_bctemp
 !--wall
 USE real_parameters,ONLY: half,zero
 USE shared_data,   ONLY : ni,nim,li,t,nj,njm,visc,celkappa,y,yc,r,ap,su,xc,x,duct,ae,movingmesh,&
-                          yPeriodic,xPeriodic,f1,celcp
+                          yPeriodic,xPeriodic,f1,celcp,ft1
 USE precision,     ONLY : r_single
 
 IMPLICIT NONE
@@ -216,8 +226,8 @@ IF(xPeriodic == 0)THEN
   IF(duct)THEN !--Inlet
     DO j=2,njm
       ij=li(2)+j
-      d=half*celkappa(ij)*(y(j)-y(j-1))*(r(j)+r(j-1))/(xc(2)-xc(1))
-      awc=d+celcp(ij-nj)*f1(ij-nj)
+      d=half*celkappa(ij-nj)*(y(j)-y(j-1))*(r(j)+r(j-1))/(xc(2)-xc(1))
+      awc=d+ft1(ij-nj)
       ap(ij)=ap(ij)+awc
       su(ij) =su(ij) +awc*t(ij-nj)
     ENDDO
@@ -238,6 +248,7 @@ IF(xPeriodic == 0)THEN
   IF(duct)THEN !--Outlet
     DO j=2,njm
       ij=li(nim)+j
+      t(ij+nj) = t(ij) !-Set to calculate the grads
       ae(ij)=zero
     END DO
   ELSE
@@ -270,7 +281,7 @@ SUBROUTINE fd_bcout
 
 USE precision,          ONLY : r_single
 USE real_parameters,    ONLY : zero,tiny,half,one
-USE shared_data,        ONLY : njm,nim,li,densit,y,u,r,f1,flomas,nj,movingmesh
+USE shared_data,        ONLY : njm,nim,li,densit,y,u,v,r,f1,flomas,nj,movingmesh
 
 IMPLICIT NONE 
 
@@ -297,6 +308,7 @@ DO j=2,njm
   ij=li(nim)+j
   f1(ij)=f1(ij)*fac
   u(ij+nj)=u(ij)*fac
+  v(ij+nj)=v(ij) !--to get the gradients right
 END DO
 
 END SUBROUTINE fd_bcout

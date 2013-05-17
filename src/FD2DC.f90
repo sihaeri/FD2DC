@@ -4,11 +4,11 @@ USE real_parameters,     ONLY : zero,half
 USE precision,           ONLY : r_single
 USE modfd_openclose_ops, ONLY : fd_open,fd_open_sres
 USE modfd_problem_setup, ONLY : fd_problem_setup,fd_problem_restart,fd_copy_time_arrays,&
-                                fd_print_var,fd_write_restart,fd_update_visc
+                                fd_print_var,fd_write_restart,fd_update_visc,fd_calc_timeCoefs
 USE shared_data,         ONLY : lread,itim,itst,louts,lcal,iu,iv,ip,ien,u,p,v,t,ltime,time,minit,&
                                 maxit,u,v,p,t,resor,nprt, filenum,problem_name,problem_len,&
                                 imon,jmon,slarge,sormax,ni,nj,loute,lwrite,nim,njm,nij,&
-                                x,y,xc,yc,li,f1,f2,vo,uo,to,putobj,dt,duct,filnprt,spherenum,isotherm,objtp,&
+                                x,y,xc,yc,li,f1,f2,ft1,ft2,vo,uo,to,putobj,dt,duct,filnprt,spherenum,isotherm,objtp,&
                                 nfil,nfilpoints,filpointx,filpointy,filru,filrv,calcsurfforce,&
                                 calcwalnusselt_ave,naverage_wsteps,xPeriodic,zsurfpointx,zsurfpointy,&
                                 zobjcellx,zobjcelly,zobjcellvertx,zobjcellverty,&
@@ -17,9 +17,9 @@ USE shared_data,         ONLY : lread,itim,itst,louts,lcal,iu,iv,ip,ien,u,p,v,t,
                                 nobjcells,nsurfpoints,objcellvertx,objcellverty,objcentu,objcentv,objcentx,&
                                 objcenty,stationary,th,movingmesh,dxmeanmoved,dxmean,dxmeanmovedtot,&
                                 lamvisc,temp_visc,tc,ulid,objradius,naverage_steps,calclocalnusselt_ave,objcentom,&
-                                voo,uoo,den,deno,celbeta,celcp,celkappa,too,calcwalnusselt,use_gpu
+                                voo,uoo,den,deno,denoo,celbeta,celcp,celcpo,celcpoo,celkappa,too,calcwalnusselt,use_gpu,initFromFile
 USE parameters,          ONLY : out_unit,eres_unit,plt_unit,force_predict,force_correct,do_collect_stat,end_collect_stat,&
-                                use_GPU_yes
+                                use_GPU_yes,no_force,OUTER_ITR_DONE
 USE modfd_set_bc,        ONLY : fd_bctime,fd_bcout
 USE modfd_calc_pre,      ONLY : fd_calc_pre
 USE modfd_calc_temp,     ONLY : fd_calc_temp
@@ -86,15 +86,20 @@ ENDIF
 npoint = 0 !--for time steps used in time averaging 
 nwpoint= 0 !--for time steps used for wall nusselt number averaging
 
+IF(initFromFile)THEN
+  CALL fd_calc_sources(no_force,dummy,0)
+  CALL fd_copy_oldvel
+ENDIF
 timeloop: DO itim = itims,itime
 
-  time = time + dt
+  CALL fd_calc_timeCoefs
   IF(putobj .AND. nsphere > 0)CALL fd_copy_oldvel
   IF(ltime)CALL fd_copy_time_arrays(.FALSE.)
 
-  WRITE(out_unit,*) '     TIME = ',time
+  WRITE(out_unit,*) '  '
   WRITE(out_unit,*) '     *****************************'
   WRITE(out_unit,*) '  '
+  WRITE(out_unit,*) '     TIME = ',time
 
   IF(louts.AND.(itim == itims)) THEN
     IF(lcal(iu)) CALL fd_print_var(u,'U VEL.')
@@ -109,7 +114,7 @@ timeloop: DO itim = itims,itime
   WRITE(out_unit,600) imon,jmon
 
   !--SET BOUNDARY CONDITIONS FOR THE NEW TIME STEP
-  IF(ltime) CALL fd_bctime
+  IF(ltime) CALL fd_bctime(itim-itims+1)
   IF(putobj)THEN
     !IF(nsphere>0)CALL fd_calc_sources(force_correct,fd_resor,0)
     IF(nfil>0 )CALL fil_calc_sources(delt1,vb_resor,0)
@@ -152,6 +157,9 @@ timeloop: DO itim = itims,itime
 
   IF(nsphere > 0)THEN
    !CALL fd_calc_surf_force(densref,0.1,1.0)
+     CALL fd_calc_ori
+     CALL fd_calc_pos(OUTER_ITR_DONE,itim-itims+1)
+     CALL fd_calc_mi
    IF(.NOT. stationary)THEN
      IF(lwrite)THEN
        DO nn = 1,nsphere
@@ -167,11 +175,8 @@ timeloop: DO itim = itims,itime
          CLOSE(1234);CLOSE(1235)
        ENDDO
      ENDIF
-     CALL fd_calc_mi
-     CALL fd_calc_ori
-     CALL fd_calc_pos(itim-itims+1)
    ENDIF
-   CALL fd_calc_physprops
+   CALL fd_calc_physprops(OUTER_ITR_DONE)
    IF(nsphere > 0 .AND. movingmesh)CALL fd_move_mesh(ismoved)
    IF(stationary)THEN
      CALL fd_calc_sources(force_correct,fd_resor,iter)
@@ -314,15 +319,17 @@ ENDIF
 IF(putobj)THEN
   CALL fd_write_restart
 ELSE
-  WRITE(eres_unit) itim,time,ni,nj,nim,njm,nij,&
+  WRITE(eres_unit) itim,time,ni,nj,nim,njm,nij,dt,&
          ((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
          ((xc(i),j=1,nj),i=1,ni),((yc(j),j=1,nj),i=1,ni),&
          (f1(ij),ij=1,nij),(f2(ij),ij=1,nij),&
+         (ft1(ij),ij=1,nij),(ft2(ij),ij=1,nij),&
          (u(ij),ij=1,nij),(v(ij),ij=1,nij),(p(ij),ij=1,nij),(t(ij),ij=1,nij),&
          (uo(ij),ij=1,nij),(vo(ij),ij=1,nij),(to(ij),ij=1,nij),&
          (uoo(ij),ij=1,nij),(voo(ij),ij=1,nij),(too(ij),ij=1,nij),&
-         (den(ij),ij=1,nij),(deno(ij),ij=1,nij),(celbeta(ij),ij=1,nij),&
-         (celcp(ij),ij=1,nij),(celkappa(ij),ij=1,nij)
+         (den(ij),ij=1,nij),(deno(ij),ij=1,nij),(denoo(ij),ij=1,nij),(celbeta(ij),ij=1,nij),&
+         (celcp(ij),ij=1,nij),(celcpo(ij),ij=1,nij),(celcpoo(ij),ij=1,nij),&
+         (celkappa(ij),ij=1,nij)
 ENDIF
 
 

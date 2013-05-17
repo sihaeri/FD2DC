@@ -609,7 +609,7 @@ END FUNCTION phir6
 
 SUBROUTINE fd_calc_sources(predict_or_correct,resor,iter)
 
-USE parameters,     ONLY : force_predict,force_correct
+USE parameters,     ONLY : force_predict,force_correct,no_force
 USE shared_data,    ONLY : fdsu,fdsv,objfx,objfy,objru,objrv,obju,objv,xPeriodic,yPeriodic,&
                            objpoint_cvx, objpoint_cvy,x,y,objcellx,objcelly,objcell_overlap,&
                            xc,yc,objcentu,objcentv,objcentom,objcentx,objcenty,&
@@ -661,6 +661,7 @@ ENDDO
 
 CALL fd_calc_rigidvel
 
+IF(predict_or_correct /= no_force)THEN
 IF(isotherm)THEN
   DO nn = 1,nsphere
     DO n = 1,nobjcells(nn)
@@ -747,7 +748,7 @@ ELSEIF(predict_or_correct==force_correct)THEN
     fdst = fdstc
   ENDIF
 ENDIF
-
+ENDIF
 
 
 END SUBROUTINE fd_calc_sources
@@ -782,23 +783,26 @@ ELSE
       objcentom(nn) = objcentom(nn) + objcellvol(n,nn) * densitp(nn) * (rxmc*objv(n,nn) - rymc*obju(n,nn))                                            
     ENDDO
     !--Convert Momentum to velocity
-    objcentu(nn) = objcentu(nn) / (objvol(nn) * densitp(nn)) + Fpq(1,nn)*dt
-    objcentv(nn) = objcentv(nn) / (objvol(nn) * densitp(nn)) + Fpq(2,nn)*dt
+    objcentu(nn) = objcentu(nn) / (objvol(nn) * densitp(nn)) !+ Fpq(1,nn)*dt
+    objcentv(nn) = objcentv(nn) / (objvol(nn) * densitp(nn)) !+ Fpq(2,nn)*dt
     objcentom(nn) = objcentom(nn) / objcentmi(nn)
   ENDDO
 ENDIF
 
 END SUBROUTINE fd_calc_rigidvel
 
-SUBROUTINE fd_calc_physprops(outvolp)
+SUBROUTINE fd_calc_physprops(itr,outvolp)
 
 USE precision,          ONLY : r_single
-USE shared_data,        ONLY : nij,x,y,objpoint_cvx,objpoint_cvy,nsphere,nobjcells,objcellvol,den,deno,densit,&
+USE parameters,         ONLY : OUTER_ITR_DONE
+USE shared_data,        ONLY : nij,x,y,objpoint_cvx,objpoint_cvy,nsphere,nobjcells,objcellvol,den,deno,denoo,densit,&
                                xc,yc,objcellx,objcelly,li,nim,njm,densitp,objpoint_interpx,objpoint_interpy,&
-                               celbeta,beta,betap,celkappa,celcp,celcpo,cpf,cpp,kappaf,kappap,lcal,ien,&
+                               celbeta,beta,betap,celkappa,celcp,celcpo,celcpoo,cpf,cpp,kappaf,kappap,lcal,ien,&
                                objcell_overlap,xPeriodic,yPeriodic,LDomainx,LDomainy
 USE real_parameters,    ONLY : zero,one
 IMPLICIT NONE
+
+INTEGER,INTENT(IN)     :: itr
 
 INTEGER                :: j,i,n,nn,ij,ii,jj,nim2,njm2
 REAL(KIND = r_single)  :: dx,dy,del,volp(nij),xp,yp
@@ -807,11 +811,19 @@ REAL(KIND = r_single),OPTIONAL  :: outvolp(nij,nsphere)
 nim2 = nim - 1
 njm2 = njm - 1
 
-deno = den
+IF(itr ==  OUTER_ITR_DONE)THEN
+
+  denoo= deno
+  deno = den
+
+  celcpoo= celcpo
+  celcpo = celcp
+
+ENDIF
+
 den = densit
 
-celcpo = celcp
-celcp = cpf
+celcp = cpf*densit
 
 celkappa = kappaf
 celbeta = beta*densit
@@ -854,7 +866,7 @@ DO nn = 1,nsphere
         IF(volp(ij) /= zero)THEN
           den(ij) = (one - volp(ij))*densit + volp(ij)*densitp(nn)
           celbeta(ij) = (one - volp(ij))*beta*densit + volp(ij)*betap(nn)*densitp(nn)
-          celcp(ij) = (one - volp(ij))*cpf + volp(ij)*cpp(nn)
+          celcp(ij) = (one - volp(ij))*cpf*densit + volp(ij)*cpp(nn)*densitp(nn)
           celkappa(ij) = (one - volp(ij))*kappaf + volp(ij)*kappap(nn)
         ENDIF
       ENDDO
@@ -1110,9 +1122,9 @@ IF(error /= 0)WRITE(*,*)'fd_move_mesh: particle lost'
 
 END SUBROUTINE fd_move_mesh
 
-SUBROUTINE fd_calc_pos(itr)
+SUBROUTINE fd_calc_pos(itr,titr)
 
-USE parameters,       ONLY : subTimeStep
+USE parameters,       ONLY : subTimeStep,OUTER_ITR_DONE
 USE precision,        ONLY : r_single
 USE shared_data,      ONLY : nsphere,nobjcells,objcentmi,objcentxo,objcentyo,objcellx,objcelly,&
                              objcentxo,objcentyo,dt,objcentu,objcentv,objcento,objpoint_interpx,objpoint_interpy,&
@@ -1125,22 +1137,32 @@ USE real_parameters,  ONLY : zero,three,two,half,one,four
 
 IMPLICIT NONE
 
-INTEGER,INTENT(IN)    :: itr
+INTEGER,INTENT(IN)    :: itr,titr
 
 INTEGER               :: n,nn,ip,jp,error,moved,k,m
 REAL(KIND = r_single) :: lindispx,lindispy,rmcx,rmcy,rmcyr,rmcxr,dxmoved(nsphere),&
-                          dtk,xShift,yShift
+                          dtk,xShift,yShift,objcentuk(nsphere),objcentvk(nsphere),&
+                          diffu,diffv,dumfx,dumfy
 REAL(KIND = r_single),ALLOCATABLE,SAVE      :: tempFpq(:,:),tempFpw(:,:) 
-REAL(KIND = r_single),PARAMETER :: rone(4) = (/one,one,one,one/)
-INTEGER,PARAMETER               :: ione(4) = (/1,1,1,1/)
+REAL(KIND = r_single),ALLOCATABLE,SAVE :: temp2Fpq(:,:) ,temp2Fpw(:,:)
+REAL(KIND = r_single),ALLOCATABLE,SAVE      :: objcellxo(:,:),objcellyo(:,:)
+INTEGER,ALLOCATABLE,SAVE                    :: zobjcellxo(:,:),zobjcellyo(:,:)
 
-IF(itr == 1)THEN
-  ALLOCATE(tempFpq(2,nsphere),tempFpw(2,nsphere))
-  tempFpq = zero 
-  tempFpw = zero
+
+IF(titr == 1 )THEN !.AND. itr ==1 
+ALLOCATE( objcellxo(MAXVAL(nobjcells,1),nsphere),objcellyo(MAXVAL(nobjcells,1),nsphere),&
+          zobjcellxo(MAXVAL(nobjcells,1),nsphere),zobjcellyo(MAXVAL(nobjcells,1),nsphere),&
+          tempFpq(2,nsphere),tempFpw(2,nsphere),temp2Fpq(2,nsphere),temp2Fpw(2,nsphere)  )
+
+tempFpq = zero 
+tempFpq = zero
+tempFpq = zero
+tempFpq = zero
+
 ENDIF
 
 IF(forcedmotion)THEN
+  IF(itr == OUTER_ITR_DONE)THEN
   DO nn = 1,nsphere
     !--Move the particle 
     objcentxo(nn) = objcentx(nn)
@@ -1160,18 +1182,15 @@ IF(forcedmotion)THEN
       ENDIF
     ENDDO
   ENDDO
+  ENDIF
 ELSE
-  !moved = 0
+      
   objcentxo(1:nsphere) = objcentx(1:nsphere)
   objcentyo(1:nsphere) = objcenty(1:nsphere)
   zobjcentxo(1:nsphere)= zobjcentx(1:nsphere)
   zobjcentyo(1:nsphere)= zobjcenty(1:nsphere)
 
   dtk = dt/REAL(subTimeStep,r_single)
-  Fdfcu = zero
-  Fdfcv = zero
-  Fpq(1:2,1:nsphere) = tempFpq(1:2,1:nsphere) 
-  Fpw(1:2,1:nsphere) = tempFpw(1:2,1:nsphere)  
   
   DO k = 1,subTimeStep
 
@@ -1180,13 +1199,8 @@ ELSE
 
     DO nn = 1,nsphere    
          
-      IF(itr == 1 .AND. .NOT. lread)THEN
         lindispx = objcentu(nn) * dtk
         lindispy = objcentv(nn) * dtk
-      ELSE
-        lindispx = (three/two*objcentu(nn) - half*objcentuo(nn)) * dtk
-        lindispy = (three/two*objcentv(nn) - half*objcentvo(nn)) * dtk
-      ENDIF
 
       objcentx(nn) = objcentx(nn) + lindispx
       objcenty(nn) = objcenty(nn) + lindispy
@@ -1209,11 +1223,21 @@ ELSE
 
     ENDDO
 
-    CALL fd_calc_part_collision
+      CALL fd_calc_part_collision(Fpq,Fpw)
 
     DO nn = 1,nsphere
-      lindispx = one/objvol(nn)/densitp(nn)/four*( tempFpq(1,nn)+Fpq(1,nn)+tempFpw(1,nn)+Fpw(1,nn) )*dtk**2
-      lindispy = one/objvol(nn)/densitp(nn)/four*( tempFpq(2,nn)+Fpq(2,nn)+tempFpw(2,nn)+Fpw(2,nn) )*dtk**2
+
+        dumfx = tempFpq(1,nn)+Fpq(1,nn)+tempFpw(1,nn)+Fpw(1,nn)
+        dumfy = tempFpq(2,nn)+Fpq(2,nn)+tempFpw(2,nn)+Fpw(2,nn)
+
+        lindispx = one/objvol(nn)/densitp(nn)/four*dumfx*dtk**2
+        lindispy = one/objvol(nn)/densitp(nn)/four*dumfy*dtk**2
+
+        diffu = one/objvol(nn)/densitp(nn)/two*dumfx*dtk
+        diffv = one/objvol(nn)/densitp(nn)/two*dumfy*dtk
+
+        objcentu(nn) = objcentu(nn) + diffu
+        objcentv(nn) = objcentv(nn) + diffv
 
       objcentx(nn) = objcentx(nn) + lindispx
       objcenty(nn) = objcenty(nn) + lindispy
@@ -1238,9 +1262,7 @@ ELSE
   
   ENDDO
 
-  !--Done to reuse Fpq
-  tempFpq(1:2,1:nsphere) = Fpq(1:2,1:nsphere)
-  tempFpw(1:2,1:nsphere) = Fpw(1:2,1:nsphere)
+    !CALL fd_calc_cellTemp
 
   DO nn = 1,nsphere
     
@@ -1249,15 +1271,8 @@ ELSE
     lindispx = objcentx(nn) - objcentxo(nn) + (zobjcentx(nn) - zobjcentxo(nn))*LDomainx
     lindispy = objcenty(nn) - objcentyo(nn) + (zobjcenty(nn) - zobjcentyo(nn))*LDomainy
     
-    IF(itr == 1 .AND. .NOT. lread)THEN
-      !--Only add the part from collision
-      Fpq(1,nn) = two/dt**2*(lindispx - objcentu(nn) * dt) 
-      Fpq(2,nn) = two/dt**2*(lindispy - objcentv(nn) * dt) 
-    ELSE
-      Fpq(1,nn) = two/dt**2*(lindispx - (three/two*objcentu(nn) - half*objcentuo(nn)) * dt) 
-      Fpq(2,nn) = two/dt**2*(lindispy - (three/two*objcentv(nn) - half*objcentvo(nn)) * dt) 
-    ENDIF
-
+      objcentu(nn) = lindispx/dt
+      objcentv(nn) = lindispy/dt
                              
     !--Update the material points
     !--orientation updated in a seperate subroutine
@@ -1378,6 +1393,9 @@ ELSE
 
   ENDDO
 ENDIF
+
+
+!CALL fd_calc_partmotion_tempSource
 
 !CALL fd_find_overlap
 dxmoved = objcentx - objcentxo + (zobjcentx - zobjcentxo)*LDomainx
@@ -2203,17 +2221,17 @@ fd_calc_delta2 = deltaX/hx*deltaY/hy
 
 END FUNCTION fd_calc_delta2
 
-SUBROUTINE fd_calc_part_collision
+SUBROUTINE fd_calc_part_collision(Fpq,Fpw)
 
 !--A naive collision strategy, Only for O(10^3) spherical particles  
 
-USE shared_data,      ONLY : nsphere,objcentx,objcenty,Fpq,Fpw,gravx,gravy,x,y,objradius,&
+USE shared_data,      ONLY : nsphere,objcentx,objcenty,gravx,gravy,x,y,objradius,&
                             xPeriodic,yPeriodic,LDomainx,LDomainy
-USE real_parameters,  ONLY : zero,two,epsilonP,five,ten,four,real_1e2,real_1e3,six,one
+USE real_parameters,  ONLY : zero,two,epsilonP,five,ten,three,real_1e2,real_1e7,six,one
 USE precision,        ONLY : r_single
 
 IMPLICIT NONE
-
+REAL(KIND = r_single),INTENT(INOUT) :: Fpq(2,nsphere),Fpw(2,nsphere)
 INTEGER :: q,p
 LOGICAL,SAVE :: Entered = .FALSE.
 REAL(KIND = r_single),SAVE :: MaxRadius,miny,maxy,minx,maxx,g,factorp,factorw
@@ -2227,7 +2245,7 @@ IF(.NOT.Entered)THEN
   g = SQRT(gravx**2+gravy**2)
   Entered = .TRUE.
   factorp = (two)*ten
-  factorw = (five)*ten
+  factorw = real_1e2*real_1e7
 ENDIF
 
 Fpq = zero
@@ -2655,5 +2673,113 @@ LOGICAL                     :: failed
   ENDDO
 
 END SUBROUTINE fd_create_interpmol_nus
+
+SUBROUTINE fd_calc_celltemp
+
+USE shared_data,    ONLY : xPeriodic,yPeriodic,x,y,objcellx,objcelly,&
+                           xc,yc,objcentx,objcenty,nobjcells,nij,objvol,&
+                           nim,njm,nj,objt,t,nsphere,LDomainx,LDomainy,&
+                           objpoint_interpx,objpoint_interpy,li
+USE precision,      ONLY : r_single
+USE real_parameters,ONLY : zero,one
+IMPLICIT NONE
+
+!--locals
+INTEGER             :: i,j,n,nn,ii,jj,nim2,njm2,ij
+REAL(KIND = r_single) :: dx,dy,del,xp,yp
+
+nim2 = nim - 1
+njm2 = njm - 1
+
+objt = zero
+
+DO nn = 1,nsphere
+  DO n = 1,nobjcells(nn)
+    DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
+      ii = i + xPeriodic*(MAX(2-i,0)*nim2 + MIN(nim-i,0)*nim2)
+      xp = objcellx(n,nn) + xPeriodic*(MAX(2-i,0)*LDomainx + MIN(nim-i,0)*LDomainx)
+      dx = x(ii) - x(ii-1)
+      DO j = objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
+        jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2)
+        yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
+        dy = y(jj) - y(jj-1)
+        del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx, dy)*dx*dy
+        ij = li(ii)+jj
+        objt(n,nn) = objt(n,nn) + t(ij)*del
+       ENDDO
+    ENDDO
+   ENDDO
+ENDDO
+
+END SUBROUTINE fd_calc_celltemp
+
+SUBROUTINE fd_calc_partmotion_tempSource
+
+USE shared_data,    ONLY : xPeriodic,yPeriodic,x,y,objcellx,objcelly,&
+                           xc,yc,objcentx,objcenty,nobjcells,nij,objvol,&
+                           nim,njm,nj,objt,t,nsphere,LDomainx,LDomainy,&
+                           objpoint_interpx,objpoint_interpy,li,objq,cpp,densitp,&
+                           dt,objcellvol,nij
+USE precision,      ONLY : r_single
+USE real_parameters,ONLY : zero,one
+IMPLICIT NONE
+
+!--locals
+INTEGER               :: i,j,n,nn,ii,jj,nim2,njm2,ij,maxpoint
+REAL(KIND = r_single) :: dx,dy,del,xp,yp,fdstpm(nij)
+REAL(KIND = r_single),ALLOCATABLE,SAVE :: objtTemp(:,:)
+LOGICAL               :: entered = .FALSE.
+
+IF(.NOT.entered)THEN
+  maxpoint = MAXVAL(nobjcells(:),1)
+  ALLOCATE(objtTemp(maxpoint,nsphere))
+  entered = .TRUE.
+ENDIF
+
+nim2 = nim - 1
+njm2 = njm - 1
+
+objtTemp = zero
+fdstpm   = zero
+
+DO nn = 1,nsphere
+  DO n = 1,nobjcells(nn)
+    DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
+      ii = i + xPeriodic*(MAX(2-i,0)*nim2 + MIN(nim-i,0)*nim2)
+      xp = objcellx(n,nn) + xPeriodic*(MAX(2-i,0)*LDomainx + MIN(nim-i,0)*LDomainx)
+      dx = x(ii) - x(ii-1)
+      DO j = objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
+        jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2)
+        yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
+        dy = y(jj) - y(jj-1)
+        del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx, dy)*dx*dy
+        ij = li(ii)+jj
+        objtTemp(n,nn) = objtTemp(n,nn) + t(ij)*del
+       ENDDO
+    ENDDO
+   ENDDO
+ENDDO 
+
+DO nn = 1,nsphere
+  DO n = 1,nobjcells(nn)
+    DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
+      ii = i + xPeriodic*(MAX(2-i,0)*nim2 + MIN(nim-i,0)*nim2)
+      xp = objcellx(n,nn) + xPeriodic*(MAX(2-i,0)*LDomainx + MIN(nim-i,0)*LDomainx)
+      dx = x(ii) - x(ii-1)
+      DO j =objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
+        jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2)
+        yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
+        dy = y(jj) - y(jj-1)
+        del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx,dy)*objcellvol(n,nn)
+        ij = li(ii)+jj
+        fdstpm(ij) = fdstpm(ij) + (objtTemp(n,nn) - objt(n,nn))*del*dx*dy
+      ENDDO
+    ENDDO
+  ENDDO
+ENDDO 
+
+t = t + fdstpm
+
+END SUBROUTINE fd_calc_partmotion_tempSource
 
 ENDMODULE modfd_create_geom

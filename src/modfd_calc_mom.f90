@@ -13,12 +13,12 @@ SUBROUTINE fd_calc_mom
 !--cancel out)
 USE parameters,         ONLY : out_unit,solver_sparsekit,solver_sip,solver_cg,solver_hypre,use_GPU_yes,OPSUCCESS,SOLVER_DONE,&
                                SOLVER_FAILED
-USE real_parameters,    ONLY : one,zero,half
+USE real_parameters,    ONLY : one,zero,half,small,two,betam
 USE shared_data,        ONLY : urf,iu,iv,p,su,sv,apu,apv,nim,njm,&
                                xc,ni,nj,li,fx,y,r,su,sv,gds,&
                                u,v,ae,aw,an,as,fy,yc,x,lcal,ien,&
-                               gravx,gravy,beta,den,deno,laxis,p,dtr,&
-                               gamt,vo,uo,voo,uoo,sor,resor,nsw,f1,f2,&
+                               gravx,gravy,beta,den,deno,denoo,laxis,p,ct1,ct2,ct3,&
+                               vo,uo,voo,uoo,sor,resor,nsw,f1,f2,&
                                dpx,dpy,t,tref,ltime,ap,fdsu,fdsv,putobj,ibsu,ibsv,nfil,&
                                dvx,dvy,dux,duy,densit,temp_visc,lamvisc,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
@@ -34,9 +34,10 @@ IMPLICIT NONE
 
 REAL(KIND = r_single) :: urfu,urfv,fxe,fxp,dxpe,s,d,cp,ce,&
                          fuuds,fvuds,fucds,fvcds,fyn,fyp,dypn,&
-                         dx,dy,rp,vol,sb,pe,pw,pn,ps,apt,cn,&
-                         vele,velw,veln,vels,due,dve,dun,dvn,visi
-INTEGER               :: ij,i,j,ije,ijn,ijs,ijw,ipar(16),debug,error,xend,yend
+                         dx,dy,rp,vol,sb,pe,pw,pn,ps,apt,apto,aptoo,cn,&
+                         vele,velw,veln,vels,due,dve,dun,dvn,visi,&
+                         duv(2),dduv(2),uvct,uc,ud,vc,vd,ufcd,vfcd,uf,vf,fg,graduv,gradcf
+INTEGER               :: ij,i,j,ije,ijn,ijs,ijw,ipar(16),debug,error,xend,yend,ic,ii,jj
 REAL                  :: fpar(16)
 
 debug = 0
@@ -93,8 +94,81 @@ DO i=2,xend
 
     fuuds=cp*u(ij)+ce*u(ije)
     fvuds=cp*v(ij)+ce*v(ije)
-    fucds=f1(ij)*(u(ije)*fxe+u(ij)*fxp)
-    fvcds=f1(ij)*(v(ije)*fxe+v(ij)*fxp)
+
+    IF( f1(ij) >= zero )THEN
+      
+      ic    = ij
+      ii    = i
+      uc    = u(ij)
+      vc    = v(ij)
+      
+      ud    = u(ije)
+      vd    = v(ije)
+
+      duv(1) = ud-uc 
+      duv(2) = vd-vc 
+     
+      graduv = DOT_PRODUCT(duv,duv) 
+
+      dduv(1) = two * dux(ic) * dxpe 
+      dduv(2) = two * dvx(ic) * dxpe 
+
+      gradCf   = DOT_PRODUCT(duv,dduv)
+     
+      uvct    = one - graduv/(gradCf+small)
+
+    ELSE
+      
+      ic    = ije
+      ii    = i+1
+      uc    = u(ije)
+      vc    = v(ije)
+      
+      ud    = u(ij)
+      vd    = v(ij)
+
+      duv(1) = ud-uc
+      duv(2) = vd-vc
+     
+      graduv = DOT_PRODUCT(duv,duv)
+     
+      dduv(1) = -two * dux(ic) * dxpe 
+      dduv(2) = -two * dvx(ic) * dxpe 
+
+      gradCf   = DOT_PRODUCT(duv,dduv)
+     
+      uvCt    = one - graduv/(gradCf+small)
+
+    ENDIF
+
+    ufcd = u(ije)*fxe+u(ij)*fxp
+    vfcd = v(ije)*fxe+v(ij)*fxp
+    !--Gamma
+    IF( uvct <= zero .OR. uvct >= one )THEN        ! 0.1 <= Beta_m <= 0.5 upwind
+      uf = uc
+      vf = vc
+    ELSEIF( betam <= uvct .AND. uvct < one  )THEN  ! Central  
+      uf = ufcd                                 
+      vf = vfcd                                            
+    ELSEIF(  zero < uvct .AND. uvct < betam )THEN  ! Gamma 
+      fg = uvct / betam                           
+      uf = fg*ufcd + (one-fg)*uc                 
+      vf = fg*vfcd + (one-fg)*vc                           
+    ENDIF
+    !--Minmod
+!    IF( uvct <= zero .OR. uvct >= one )THEN        ! 0.1 <= Beta_m <= 0.5 upwind
+!      uf = uc
+!      vf = vc
+!    ELSEIF(  uvct < half )THEN  ! Second order Upwind 
+!      uf = uc + dux(ic)*(x(i) - xc(ii))                
+!      vf = vc + dvx(ic)*(x(i) - xc(ii))  
+!    ELSE  ! Central  
+!      uf = ufcd                                 
+!      vf = vfcd                                            
+!    ENDIF
+
+    fucds=f1(ij)*uf
+    fvcds=f1(ij)*vf
 
     !--COEFFICIENTS AE(P) AND AW(E) DUE TO UDS
 
@@ -141,6 +215,7 @@ DO j=2,yend
   DO i=2,nim
     ij =li(i)+j
     ijn=ij+1-j/njm*(j-1)
+ 
     !--CELL FACE AREA S = DX*RN*1
     s=(x(i)-x(i-1))*r(j)
     !--COEFFICIENT RESULTING FROM DIFFUSIVE FLUX (SAME FOR U AND V)
@@ -154,8 +229,81 @@ DO j=2,yend
 
     fuuds=cp*u(ij)+cn*u(ijn)
     fvuds=cp*v(ij)+cn*v(ijn)
-    fucds=f2(ij)*(u(ijn)*fyn+u(ij)*fyp)
-    fvcds=f2(ij)*(v(ijn)*fyn+v(ij)*fyp)
+
+    IF( f2(ij) >= zero )THEN
+      
+      ic    = ij 
+      jj    = j
+      uc    = u(ij)
+      vc    = v(ij)
+      
+      ud    = u(ijn)
+      vd    = v(ijn)
+      
+      duv(1) = ud-uc 
+      duv(2) = vd-vc 
+     
+      graduv = dot_product(duv,duv) 
+
+      dduv(1) = two * duy(ic)*dypn 
+      dduv(2) = two * dvy(ic)*dypn 
+
+      gradCf   = dot_product(duv,dduv)
+     
+      uvct    = one - graduv/(gradCf+small)
+
+    ELSE
+      
+      ic    = ijn
+      jj    = j+1
+      uc    = u(ijn)
+      vc    = v(ijn)
+      
+      ud    = u(ij)
+      vd    = v(ij)
+
+      duv(1) = ud-uc
+      duv(2) = vd-vc
+     
+      graduv = dot_product(duv,duv)
+     
+      dduv(1) = -two * duy(ic) * dypn 
+      dduv(2) = -two * dvy(ic) * dypn 
+
+      gradCf   = dot_product(duv,dduv)
+     
+      uvCt    = one - graduv/(gradCf+small)
+
+    ENDIF
+
+    ufcd = u(ijn)*fyn+u(ij)*fyp
+    vfcd = v(ijn)*fyn+v(ij)*fyp
+    
+    IF( uvct <= zero .OR. uvct >= one )THEN        ! 0.1 <= Beta_m <= 0.5 upwind
+      uf = uc
+      vf = vc
+    ELSEIF( betam <= uvct .AND. uvct < one  )THEN  ! Central  
+      uf = ufcd                                 
+      vf = vfcd                                            
+    ELSEIF(  zero < uvct .AND. uvct < betam )THEN  ! Gamma 
+      fg = uvct / betam                           
+      uf = fg*ufcd + (one-fg)*uc                 
+      vf = fg*vfcd + (one-fg)*vc                           
+    ENDIF
+
+!    IF( uvct <= zero .OR. uvct >= one )THEN        ! 0.1 <= Beta_m <= 0.5 upwind
+!      uf = uc
+!      vf = vc
+!    ELSEIF(  uvct <= half )THEN  ! Second order Upwind 
+!      uf = uc + duy(ic)*(y(j) - yc(jj))                
+!      vf = vc + dvy(ic)*(y(j) - yc(jj))  
+!    ELSE  ! Central  
+!      uf = ufcd                                 
+!      vf = vfcd                                            
+!    ENDIF
+
+    fucds=f2(ij)*uf
+    fvcds=f2(ij)*vf
 
     !--COEFFICIENTS AN(P) AND AS(N) DUE TO UDS
     
@@ -231,11 +379,13 @@ DO i=2,nim
     !--UNSTEADY TERM CONTRIBUTION TO AP AND SU
 
     IF(LTIME) THEN
-      apt=deno(ij)*vol*dtr
-      su(ij)=su(ij)+(one+gamt)*apt*uo(ij)-half*gamt*apt*uoo(ij)
-      sv(ij)=sv(ij)+(one+gamt)*apt*vo(ij)-half*gamt*apt*voo(ij)
-      apv(ij)=apv(ij)+(one+half*gamt)*apt
-      apu(ij)=apu(ij)+(one+half*gamt)*apt
+      aptoo=denoo(ij)*vol*ct3
+      apto =deno(ij)*vol*ct2
+      apt  =den(ij)*vol*ct1
+      su(ij)=su(ij)+apto*uo(ij)+aptoo*uoo(ij)
+      sv(ij)=sv(ij)+apto*vo(ij)+aptoo*voo(ij)
+      apv(ij)=apv(ij)+apt
+      apu(ij)=apu(ij)+apt
     ENDIF
 
     IF(putobj)THEN
@@ -284,9 +434,14 @@ IF(solver_type == solver_sparsekit)THEN
     CALL copy_solution(u,sol)
 
     100 CONTINUE
-    IF(error /= OPSUCCESS .OR. error == SOLVER_FAILED)THEN
-      WRITE(*,*)'GPU--solver problem.'
+    IF(error == SOLVER_FAILED)THEN
+      WRITE(*,*)'GPU-- x-Momentum solver failed to find solution.'
+!      PAUSE
+!      STOP
+    ELSEIF(error /= OPSUCCESS)THEN
+      WRITE(*,*)'GPU-- x-Momentum solver problem in CUDA operations.'
       PAUSE
+      STOP
     ENDIF
   ELSE
     
@@ -363,9 +518,14 @@ IF(solver_type == solver_sparsekit)THEN
     CALL copy_solution(v,sol)
 
     200 CONTINUE
-    IF(error /= OPSUCCESS .OR. error == SOLVER_FAILED)THEN
-      WRITE(*,*)'GPU--solver problem.'
+    IF(error == SOLVER_FAILED)THEN
+      WRITE(*,*)'GPU-- y-Momentum solver failed to find solution.'
+!      PAUSE
+!      STOP
+    ELSEIF(error /= OPSUCCESS)THEN
+      WRITE(*,*)'GPU-- y-Momentum solver problem in CUDA operations.'
       PAUSE
+      STOP
     ENDIF
   ELSE
     
