@@ -1,10 +1,14 @@
 MODULE shared_data
 
+use cula_sparse_type
+use cula_sparse
+use, intrinsic :: iso_c_binding
+
 USE parameters,     ONLY : nphi, max_char_len
 USE precision,      ONLY : r_single
 
 INTEGER     :: solver_type
-INTEGER     :: use_GPU
+INTEGER     :: use_GPU,devID
 LOGICAL     :: temp_visc !--Set to true in the problem setup for temperature dependant viscosity
 
 INTEGER     :: xPeriodic,yPeriodic !--Set to 1 for periodic bc overrides all boundary conditions
@@ -153,7 +157,6 @@ LOGICAL                       :: duct !--if true inlet outlet boundary
 !--mcellpercv: number of material cv per cv
 !--objtp: particle temperature
 !--nsphere: number of spheres
-!--filnprt: similar to nprt (for filament geommetry)
 !--sphnprt: similar to nprt (for moving spheres)
 !--nnusseltpoints: number ofnusseltpoints to calculate the local nusselt number 
 !                  this is defined seperatly from nsurfacepoints since we what 
@@ -175,10 +178,10 @@ LOGICAL                       :: duct !--if true inlet outlet boundary
 !--calcwalnusselt: calculate the local nusselt number on the left wall.
 !--calcwalnusselt_ave: calculate the local nusselt number on the left wall (with time averaging)
 REAL(KIND = r_single),ALLOCATABLE,DIMENSION(:)     :: ibsu,ibsv
-INTEGER                       :: nsphere,nfil,filnprt,sphnprt,naverage_steps,naverage_wsteps
+INTEGER                       :: nsphere,sphnprt,naverage_steps,naverage_wsteps
 LOGICAL                       :: putobj,calcsurfforce,calclocalnusselt,read_fd_geom,stationary,movingmesh,&
                                  forcedmotion,isotherm,calclocalnusselt_ave,calcwalnusselt,calcwalnusselt_ave
-REAL(KIND = r_single)         :: fd_urf,filgravx,filgravy,filfr,filalpha,filbeta,filgamma
+REAL(KIND = r_single)         :: fd_urf
 REAL(KIND = r_single)         :: dxmean,dxmeanmoved,dxmeanmovedtot
 
 !--Current particle velocity for the forced motion case
@@ -205,7 +208,9 @@ INTEGER,ALLOCATABLE,DIMENSION(:)                 :: zobjcentx,zobjcenty,zobjcent
 INTEGER,ALLOCATABLE,DIMENSION(:,:)               :: zsurfpointx,zsurfpointy,zobjcellx,zobjcelly
 INTEGER,ALLOCATABLE,DIMENSION(:,:,:)             :: zobjcellvertx,zobjcellverty
 
-INTEGER,DIMENSION(:,:),ALLOCATABLE               :: objcell_overlap
+INTEGER,DIMENSION(:,:),ALLOCATABLE               :: objcell_bndFlag !--Keeps track of objcells outside boundaries
+INTEGER,DIMENSION(:),ALLOCATABLE                 :: rigidforce_contrib !--Keep track of which particle contributes to the constraint
+                                                                       !--on cell ij
 !--Particle Collision forces, 
 !--Fpq, sum of forces on particle p due to all other particles q /= p, 
 !--Fpw, sum of forces on particle p due to all walls  
@@ -215,26 +220,7 @@ REAL(KIND = r_single),DIMENSION(:,:,:),ALLOCATABLE :: objcellvertx,objcellverty,
 INTEGER,DIMENSION(:,:),ALLOCATABLE               :: objpoint_cvx,objpoint_cvy
 INTEGER,DIMENSION(:,:,:),ALLOCATABLE             :: objpoint_interpx,objpoint_interpy
 
-!--Allocatable for 1..nfil; These are similar to sphere counterparts
-!--densitfil is the difference between the densities of filament and fluid
-!--filbenrig: is the filament bending rigidity 
-!--filsb,filsy,filsx: used to keep the rhs for the tension eq and position eq (x,y equations).
-!--filinitposx,*y: are the initial positions of the first node (fixed)
-!--filtheta: angle of the last point meassured counterclockwise with respect to x-axis (in radians)
-!--filintegfx,filintegfy: integral of the velocity error
-!--filcintegfx,filcintegfy: current time step contribution to the integral of the error, used to correct the integral
 INTEGER                          :: deltalen 
-INTEGER,DIMENSION(:),ALLOCATABLE :: nfilpoints
-REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE   :: densitfil,filap,filaw,filae,filst,filbenrig,filsx,filsy,fillen,fillenc,&
-                                                    filfirstposx,filfirstposy,fillasttheta
-!--Allocatable for 1..Max(nfilpoints),1..nfil
-REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: filpointx,filpointy,filpointyo,filpointxo,&
-                                                    filten,filds,filpointxpen,filpointypen,filu,filv,&
-                                                    filru,filrv,filfx,filfy,filintegfx,filintegfy,&
-                                                    filcintegfx,filcintegfy
-
-INTEGER,DIMENSION(:,:),ALLOCATABLE               :: filpoint_cvx,filpoint_cvy
-INTEGER,DIMENSION(:,:,:),ALLOCATABLE             :: filpoint_interpx,filpoint_interpy
 
 !==allocatable for 1..ncv (Eulerian) (no everlaps between objects), used both for VB and FD
 !--these are body forces, s means source, then variable, b is averaged c is correction
@@ -285,5 +271,37 @@ INTEGER,DIMENSION(:,:,:,:),ALLOCATABLE               :: surfpoint_interp,nusselt
 INTEGER,ALLOCATABLE            :: celltype(:)
 
 INTEGER                        :: ndt !ndt is the numebr of time steps to get to the final velocity
+
+!--GPU Variables for CULA
+! library handle
+type(culaSparseHandle) :: handle
+integer                :: culaStat
+! configuration options
+type(culaSparseConfig) :: config
+type(culaSparseCudaOptions) :: platformOpts
+type(culaSparseCooOptions) :: formatOpts
+type(culaSparseBicgstabOptions) :: solverOpts
+type(culaSparseJacobiOptions) :: precondOpts
+! results
+type(culaSparseResult) :: res
+
+!--LAMMPS VARIABLES
+INTEGER                :: use_lammps
+TYPE(c_ptr)            :: lmp_ptr
+DOUBLE PRECISION, ALLOCATABLE :: lmp_x(:)
+DOUBLE PRECISION, ALLOCATABLE :: lmp_v(:)
+DOUBLE PRECISION, ALLOCATABLE :: lmp_o(:)
+DOUBLE PRECISION, ALLOCATABLE :: lmp_objRadius(:)
+DOUBLE PRECISION, ALLOCATABLE :: lmp_objMass(:)
+INTEGER, ALLOCATABLE          :: lmp_img(:)
+
+CHARACTER(LEN = 80) :: lmp_fname
+!--Spring-Dashpot Constants (assuming hooke model with history effects)
+REAL(KIND = r_single) :: lmp_kn,lmp_kt,lmp_gamman,lmp_gammat,lmp_mut,&
+                         lmp_dt
+INTEGER               :: lmp_flag,lmp_nstep
+CHARACTER(LEN = 256)  :: lmp_command
+REAL(C_double), pointer   :: lmp_dppDummy => NULL()
+INTEGER(C_int)            :: lmp_iDummy
 
 END MODULE shared_data

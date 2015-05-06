@@ -19,17 +19,22 @@ USE shared_data,        ONLY : urf,iu,iv,p,su,sv,apu,apv,nim,njm,&
                                u,v,ae,aw,an,as,fy,yc,x,lcal,ien,&
                                gravx,gravy,beta,den,deno,denoo,laxis,p,ct1,ct2,ct3,&
                                vo,uo,voo,uoo,sor,resor,nsw,f1,f2,&
-                               dpx,dpy,t,tref,ltime,ap,fdsu,fdsv,putobj,ibsu,ibsv,nfil,&
+                               dpx,dpy,t,tref,ltime,ap,fdsu,fdsv,putobj,&
                                dvx,dvy,dux,duy,densit,temp_visc,lamvisc,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
                                Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celbeta,&
-                               fdfcu,fdfcv,use_GPU,xPeriodic,yPeriodic
+                               fdfcu,fdfcv,use_GPU,xPeriodic,yPeriodic,&
+                               handle, config, platformOpts, formatOpts, solverOpts, precondOpts, res, culaStat
+
+use cula_sparse_type
+use cula_sparse
+
 USE modfd_set_bc,       ONLY : fd_bcpressure,fd_bcuv,fd_calc_bcuv_grad
 USE precision,          ONLY : r_single
 USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual,fd_cooVal_create
-USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGSTAB_itr,&
-                                  cu_cpD2H_solDP
+!USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGSTAB_itr,&
+!                                  cu_cpD2H_solDP
 IMPLICIT NONE
 
 REAL(KIND = r_single) :: urfu,urfv,fxe,fxp,dxpe,s,d,cp,ce,&
@@ -389,13 +394,8 @@ DO i=2,nim
     ENDIF
 
     IF(putobj)THEN
-      IF(nfil > 0)THEN
-        su(ij) = su(ij) + ibsu(ij) + fdsu(ij) + (den(ij)-densit) * gravx * vol !+ fdfcu(ij) 
-        sv(ij) = sv(ij) + ibsv(ij) + fdsv(ij) + (den(ij)-densit) * gravy * vol !+ fdfcv(ij)
-      ELSE
-        su(ij) = su(ij) + fdsu(ij) + (den(ij)-densit) * gravx * vol !+ fdfcu(ij)
-        sv(ij) = sv(ij) + fdsv(ij) + (den(ij)-densit) * gravy * vol !+ fdfcv(ij)
-      ENDIF
+      su(ij) = su(ij) + fdsu(ij) + (den(ij)-densit) * gravx * vol !+ fdfcu(ij)
+      sv(ij) = sv(ij) + fdsv(ij) + (den(ij)-densit) * gravy * vol !+ fdfcv(ij)
     ENDIF
   END DO
 END DO
@@ -418,31 +418,43 @@ IF(solver_type == solver_sparsekit)THEN
   IF(use_GPU == use_GPU_yes)THEN
     
     CALL fd_cooVal_create(ap,as,an,aw,ae,su,u)
-
-    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
-    IF(error /= OPSUCCESS)GOTO 100
     
-    CALL cu_BiCGSTAB_setStop(nsw(iu),sor(iu),error)
-    IF(error /= OPSUCCESS)GOTO 100
+    config%relativeTolerance = sor(iu)
+    config%maxIterations = nsw(iu)
+    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
+                                solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
+  
+    resor(iu) = res%residual%relative
     
-    CALL  cu_BiCGSTAB_itr(resor(iu),ipar(1),error)
-    IF(error /= SOLVER_DONE)GOTO 100
+!    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
+!    IF(error /= OPSUCCESS)GOTO 100
     
-    CALL  cu_cpD2H_solDP(sol,error)
-    IF(error /= OPSUCCESS)GOTO 100
+!    CALL cu_BiCGSTAB_setStop(nsw(iu),sor(iu),error)
+!    IF(error /= OPSUCCESS)GOTO 100
     
-    CALL copy_solution(u,sol)
-
-    100 CONTINUE
-    IF(error == SOLVER_FAILED)THEN
-      WRITE(*,*)'GPU-- x-Momentum solver failed to find solution.'
-!      PAUSE
-!      STOP
-    ELSEIF(error /= OPSUCCESS)THEN
-      WRITE(*,*)'GPU-- x-Momentum solver problem in CUDA operations.'
-      PAUSE
+!    CALL  cu_BiCGSTAB_itr(resor(iu),ipar(1),error)
+!    IF(error /= SOLVER_DONE)GOTO 100
+    
+!    CALL  cu_cpD2H_solDP(sol,error)
+!    IF(error /= OPSUCCESS)GOTO 100
+    
+    IF(culaStat /= culaSparseNoError)THEN
+      WRITE(*,*)'CULA encoutered an error.'
+      culaStat=culaSparseDestroy(handle)
       STOP
     ENDIF
+
+    CALL copy_solution(u,sol)
+
+!    IF(error == SOLVER_FAILED)THEN
+!      WRITE(*,*)'GPU-- x-Momentum solver failed to find solution.'
+!      STOP
+!      STOP
+!    ELSEIF(error /= OPSUCCESS)THEN
+!      WRITE(*,*)'GPU-- x-Momentum solver problem in CUDA operations.'
+!      STOP
+!      STOP
+!    ENDIF
   ELSE
     
     CALL fd_cooVal_create(ap,as,an,aw,ae,su,u)
@@ -464,8 +476,7 @@ IF(solver_type == solver_sparsekit)THEN
         !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
         !                       WORK,Acsr,Aclc,Arwc)
     CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
-                          WORK, Acsr,Aclc,Arwc,        &
-	                           NNZ,  Alu,Jlu,Ju,Jw          )
+                          WORK, Acsr,Aclc,Arwc,NNZ,Alu,Jlu,Ju,Jw)
   
 
     CALL copy_solution(u,sol)
@@ -503,30 +514,42 @@ IF(solver_type == solver_sparsekit)THEN
     
     CALL fd_cooVal_create(ap,as,an,aw,ae,sv,v)
 
-    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
-    IF(error /= OPSUCCESS)GOTO 200
-    
-    CALL cu_BiCGSTAB_setStop(nsw(iv),sor(iv),error)
-    IF(error /= OPSUCCESS)GOTO 200
-    
-    CALL  cu_BiCGSTAB_itr(resor(iv),ipar(1),error)
-    IF(error /= SOLVER_DONE)GOTO 200
-    
-    CALL  cu_cpD2H_solDP(sol,error)
-    IF(error /= OPSUCCESS)GOTO 200
-    
-    CALL copy_solution(v,sol)
+    config%relativeTolerance = sor(iv)
+    config%maxIterations = nsw(iv)
+    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
+                                solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
+   
+    resor(iv) = res%residual%relative
 
-    200 CONTINUE
-    IF(error == SOLVER_FAILED)THEN
-      WRITE(*,*)'GPU-- y-Momentum solver failed to find solution.'
-!      PAUSE
-!      STOP
-    ELSEIF(error /= OPSUCCESS)THEN
-      WRITE(*,*)'GPU-- y-Momentum solver problem in CUDA operations.'
-      PAUSE
+!    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
+!    IF(error /= OPSUCCESS)GOTO 200
+    
+!    CALL cu_BiCGSTAB_setStop(nsw(iv),sor(iv),error)
+!    IF(error /= OPSUCCESS)GOTO 200
+    
+!    CALL  cu_BiCGSTAB_itr(resor(iv),ipar(1),error)
+!    IF(error /= SOLVER_DONE)GOTO 200
+    
+!    CALL  cu_cpD2H_solDP(sol,error)
+!    IF(error /= OPSUCCESS)GOTO 200
+    
+    IF(culaStat /= culaSparseNoError)THEN
+      WRITE(*,*)'CULA encoutered an error.'
+      culaStat=culaSparseDestroy(handle)
       STOP
     ENDIF
+
+    CALL copy_solution(v,sol)
+
+!    200 CONTINUE
+!    IF(error == SOLVER_FAILED)THEN
+!      WRITE(*,*)'GPU-- y-Momentum solver failed to find solution.'
+!      STOP
+!      STOP
+!    ELSEIF(error /= OPSUCCESS)THEN
+!      WRITE(*,*)'GPU-- y-Momentum solver problem in CUDA operations.'
+!      STOP
+!    ENDIF
   ELSE
     
     CALL fd_cooVal_create(ap,as,an,aw,ae,sv,v)
@@ -548,8 +571,7 @@ IF(solver_type == solver_sparsekit)THEN
         !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
         !                       WORK,Acsr,Aclc,Arwc)
     CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
-                          WORK, Acsr,Aclc,Arwc,        &
-	                           NNZ,  Alu,Jlu,Ju,Jw          )
+                          WORK, Acsr,Aclc,Arwc,NNZ,Alu,Jlu,Ju,Jw)
 
     CALL copy_solution(v,sol)
 

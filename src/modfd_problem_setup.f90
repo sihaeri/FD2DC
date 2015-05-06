@@ -7,11 +7,12 @@ CONTAINS
 !============================================
 SUBROUTINE fd_problem_setup
 
-USE real_parameters,        ONLY : zero,one,two,pi,half
+USE real_parameters,        ONLY : zero,one,two,pi,half,quarter,vlarge,vsmall,oneandhalf,fourthird,small
 USE parameters,             ONLY : out_unit,set_unit,alloc_create,nphi,grd_unit,max_char_len,solver_sparsekit,solver_sip,&
-                                    solver_cg,solver_hypre,plt_unit,init_field_unit,use_GPU_yes,use_GPU_no,OPSUCCESS
+                                   subTimeStep,solver_cg,solver_hypre,plt_unit,init_field_unit,use_GPU_yes,use_GPU_no,&
+                                   OPSUCCESS,USE_LAMMPS_YES,USE_LAMMPS_NO,LMP_COMMANDS,RANK_ONE,RANK_THREE
 USE precision,              ONLY : r_single
-USE shared_data,            ONLY : solver_type,NNZ,NCel,lli,itim,time,lread,lwrite,ltest,louts,loute,ltime,&
+USE shared_data,            ONLY : devID,solver_type,NNZ,NCel,lli,itim,time,lread,lwrite,ltest,louts,loute,ltime,&
                                    maxit,imon,jmon,ipr,jpr,sormax,slarge,alfa,minit,initFromFile,&
                                    densit,visc,gravx,gravy,beta,tref,problem_name,problem_len,lamvisc,&
                                    ulid,tper,itst,nprt,dt,dto,gamt,iu,iv,ip,ien,tper,f1,ft1,f2,voo,uoo,too,&
@@ -21,32 +22,32 @@ USE shared_data,            ONLY : solver_type,NNZ,NCel,lli,itim,time,lread,lwri
                                    vo,uo,to,title,duct,flomas,flomom,f1,stationary,celbeta,celkappa,celcp,celcpo,celcpoo,&  !--FD aspect
                                    objcentx,objcenty,objcentxo,objcentyo,objradius,putobj,nsurfpoints,read_fd_geom,&
                                    betap,movingmesh,forcedmotion,up,vp,omp,isotherm,objqp,objbradius,&
-                                   densitp,fd_urf,mcellpercv,objtp,nsphere,calcsurfforce,& !--filament
-                                   filgravx,filgravy,nfilpoints,nfil,densitfil,filbenrig,fillen,&
-                                   filalpha,filbeta,filgamma,&
-                                   filfirstposx,filfirstposy,fillasttheta,filnprt,filfr,& !--heat
+                                   densitp,fd_urf,mcellpercv,objtp,nsphere,calcsurfforce,rigidForce_contrib,& !--heat
                                    nnusseltpoints,calclocalnusselt,deltalen,sphnprt,betap,kappap,cpp,&
                                    mpi_comm,Hypre_A,Hypre_b,Hypre_x,nprocs_mpi,myrank_mpi,& !--viscosity temperature dependance
                                    temp_visc,viscgamma,calclocalnusselt_ave,naverage_steps,&
-                                   use_GPU,arow,acol,acoo,acsr,aclc,arwc,ndt
+                                   use_GPU,arow,acol,acoo,acsr,aclc,arwc,ndt,& !--CULA Variables
+				   handle, platformOpts, formatOpts,  precondOpts, solverOpts, config, & !--LAMMPS Variables
+                                   lmp_fname, lmp_kn, lmp_kt, lmp_gamman, lmp_gammat, lmp_mut, use_lammps, lmp_flag
+
+use cula_sparse_type
+use cula_sparse
 
 USE modfd_set_bc,           ONLY : fd_bctime
-USE modfd_create_geom,      ONLY : fd_create_geom,fd_calc_mi,fd_calc_physprops,fd_calc_geom_volf,fd_calc_physprops,&
-                                   fd_calc_quality,fd_init_temp
-USE modfil_create_geom,     ONLY : fil_create_geom
+USE modfd_create_geom,      ONLY : fd_create_geom,fd_calc_mi,fd_calc_physprops,fd_calc_physprops,&
+                                   fd_calc_quality,fd_init_temp,fd_find_rigidforce_contrib
 USE modfd_tecwrite,         ONLY : fd_tecwrite_sph_s,fd_tecwrite_sph_v,fd_tecwrite_eul
 
-USE modcu_BiCGSTAB,         ONLY : cu_getInstance,cu_initDevice,cu_allocDevice,cu_shutdown,cu_coo2csr,cu_cpH2D_coords
-USE modfd_solve_linearsys,  ONLY : fd_cooInd_create
+!USE modcu_BiCGSTAB,         ONLY : cu_getInstance,cu_initDevice,cu_allocDevice,cu_shutdown,cu_coo2csr,cu_cpH2D_coords
 
+USE modfd_solve_linearsys,  ONLY : fd_cooInd_create
+USE modlmp_particle,        ONLY : lmp_setup
 IMPLICIT NONE
 
-REAL(KIND = r_single) :: uin,vin,pin,tin,dx,dy,rp,domain_vol,rdummy
+REAL(KIND = r_single) :: uin,vin,pin,tin,dx,dy,rp,domain_vol,rdummy,massi,massj,mstar
 INTEGER               :: i,j,ij,ncell,idummy,error
 !REAL(KIND = r_single),ALLOCATABLE :: volp(:,:),q(:)
 
-
-use_GPU = use_GPU_yes
 error = OPSUCCESS
 solver_type = solver_sparsekit
 itim = 0
@@ -56,7 +57,16 @@ naverage_steps = 0
 CALL fd_alloc_solctrl_arrays(alloc_create)
 
 READ(set_unit,6)title
-READ(set_unit,*)xPeriodic,yPeriodic
+READ(set_unit,*)xPeriodic,yPeriodic,use_GPU,devID,use_lammps
+
+IF(use_lammps == USE_LAMMPS_YES)THEN
+  READ(set_unit,*)lmp_fname
+  READ(set_unit,*)lmp_kn,lmp_kt,lmp_gamman,lmp_gammat,lmp_mut,lmp_flag
+ENDIF
+IF(use_GPU /= use_GPU_no .AND. use_GPU /= use_GPU_yes)THEN
+  WRITE(*,'(A, I5, A, I5)')'use_gpu should be:', use_GPU_yes,', or:', use_GPU_no
+  STOP
+ENDIF 
 
 IF((xPeriodic /= 0 .AND. xPeriodic /= 1) .OR. (yPeriodic /= 0 .AND. yPeriodic /= 1))THEN
   WRITE(*,*)'Periodic boundary controller variables should be 0 or 1.'
@@ -116,25 +126,7 @@ IF(putobj)THEN
       IF(calcsurfforce)CALL fd_alloc_surfforce_arrays(alloc_create,MAXVAL(nsurfpoints(:),1))
     ENDIF
   ENDIF
-  READ(set_unit,*)nfil
-  IF(nfil > 0)THEN
-    READ(set_unit,*)filnprt,filgravx,filgravy,filalpha,filbeta
- 
-    CALL fd_alloc_filprop_arrays(alloc_create)
- 
-    DO i=1,nfil
-      READ(set_unit,*)nfilpoints(i),densitfil(i),filbenrig(i),fillen(i)
-      READ(set_unit,*)filfirstposx(i),filfirstposy(i),fillasttheta(i)
-    ENDDO
-    IF(.NOT.lread)THEN
-      CALL fd_alloc_filwork_arrays(alloc_create,MAXVAL(nfilpoints(:),1))
-      CALL fd_alloc_filgeom_arrays(alloc_create,MAXVAL(nfilpoints(:),1))
-    ENDIF
-  ENDIF
-
 ENDIF
-
-!filfr(n) = SQRT(filgravx*filgravx + filgravy&filgravy)*fillen(n)(/ulid**2
 
 !-- Init solved variable index
 iu = 1
@@ -164,7 +156,6 @@ DO i=1,ni
   li(i)=(i-1)*nj
 END DO
 
-
 !-----number of s-n faces + number of e-w faces + central coefficients
 NCel = 0
 DO i=2,nim
@@ -181,25 +172,35 @@ IF(solver_type == solver_sparsekit .OR. solver_type == solver_hypre)THEN
   CALL fd_cooInd_create() !--Create coordinate arrays Arow, Acol
 
   IF(use_GPU == use_GPU_yes)THEN
-
-    CALL cu_getInstance()
-    IF(error /= OPSUCCESS)GOTO 100
-    CALL cu_initDevice(error)
-    IF(error /= OPSUCCESS)GOTO 100
-    CALL cu_allocDevice(NNZ,NCel,error)
-    IF(error /= OPSUCCESS)GOTO 100
-    CALL cu_cpH2D_coords(Arow,Acol,error)
-    IF(error /= OPSUCCESS)GOTO 100
-    CALL cu_coo2csr(error)
-    IF(error /= OPSUCCESS)GOTO 100
-
+    WRITE(*,*)'Initializing GPU using CULA ...'
+!    CALL cu_getInstance()
+!    IF(error /= OPSUCCESS)GOTO 100
+!    CALL cu_initDevice(devID,error)
+!    IF(error /= OPSUCCESS)GOTO 100
+!    CALL cu_allocDevice(NNZ,NCel,error)
+!    IF(error /= OPSUCCESS)GOTO 100
+!    CALL cu_cpH2D_coords(Arow,Acol,error)
+!    IF(error /= OPSUCCESS)GOTO 100
+!    CALL cu_coo2csr(error)
+!    IF(error /= OPSUCCESS)GOTO 100
+     IF(culaSparseCreate(handle) /= culaSparseNoError)GOTO 100
+     IF(culaSparseCudaOptionsInit(handle, platformOpts) /= culaSparseNoError)GOTO 100
+     platformOpts%deviceId=devId
+     platformOpts%useHybridFormat=1
+    IF(culaSparseCooOptionsInit(handle, formatOpts) /= culaSparseNoError)GOTO 100
+    formatOpts%indexing = 1
+    IF(culaSparseJacobiOptionsInit(handle, precondOpts) /= culaSparseNoError)GOTO 100
+    !IF(culaSparseEmptyOptionsInit(handle, precondOpts) /= culaSparseNoError)GOTO 100
+    IF(culaSparseConfigInit(handle, config) /= culaSparseNoError)GOTO 100
+    IF(culaSparseBicgstabOptionsInit(handle, solverOpts) /= culaSparseNoError)GOTO 100
+    WRITE(*,*)'GPU Initialized.'
   ENDIF
 
   100 CONTINUE
-  IF(error /= OPSUCCESS)THEN
+  IF(error /= culaSparseNoError)THEN
     WRITE(*,*)'Unable to start the GPU. Running the solve on the CPU instead...'
     use_GPU = use_GPU_no
-    CALL cu_shutdown(error)
+!    CALL cu_shutdown(error)
   ENDIF
 ENDIF
 !IF(solver_type == solver_hypre)CALL solve_hypre_sys_init(mpi_comm,myrank_mpi,nprocs_mpi,ncel,Hypre_A,Hypre_b,Hypre_x) 
@@ -246,25 +247,31 @@ ENDIF
 IF(putobj)THEN
   IF(.NOT.lread)THEN
     IF(nsphere > 0)CALL fd_create_geom
-    IF(nfil > 0)CALL fil_create_geom
     IF(nsphere > 0)CALL fd_alloc_objcell_vars(alloc_create)
     CALL fd_alloc_sources(alloc_create)
-  ELSE
-    ncell = 0
-    domain_vol = zero
-    DO i=2,nim
-      dx=x(i)-x(i-1)
-      DO j=2,njm
-        ncell = ncell + 1
-        dy=y(j)-y(j-1)
-        rp=half*(r(j)+r(j-1))
-        domain_vol = domain_vol + (dx*dy*rp)**half
-      ENDDO
-    ENDDO
-            
-    dxmean = domain_vol/REAL(ncell,r_single)
   ENDIF
   CALL fd_calc_mi
+
+  ncell = 0
+  domain_vol = zero
+  DO i=2,nim
+    dx=x(i)-x(i-1)
+    DO j=2,njm
+      ncell = ncell + 1
+      dy=y(j)-y(j-1)
+      rp=half*(r(j)+r(j-1))
+      domain_vol = domain_vol + (dx*dy*rp)**half
+    ENDDO
+  ENDDO
+            
+  dxmean = domain_vol/REAL(ncell,r_single)
+  !-----LAMMPS Setup
+  !-----Initialize and setup based on the code input
+  IF(use_lammps==USE_LAMMPS_YES)THEN
+    
+    call lmp_setup
+  
+  ENDIF
 ENDIF
 
 !---------------------------------------------------
@@ -317,7 +324,10 @@ ELSE
   DO i=2,nim
     u(li(i)+nj)=ulid
   END DO
- ENDIF
+  DO i=2,nim
+    u(li(i)+1)=-ulid
+  END DO
+ENDIF
 ENDIF
 
 
@@ -359,6 +369,8 @@ ENDIF
 
 IF(putobj)THEN
   IF(nsphere > 0)THEN
+    !--Mark effected cells
+    CALL fd_find_rigidforce_contrib
     CALL fd_calc_physprops(1)
     CALL fd_init_temp(tin)
   ENDIF
@@ -407,7 +419,7 @@ USE shared_data
 
 IMPLICIT NONE
 
-INTEGER :: lni,lnj,lnim,lnjm,lnij,ij,i,j,lnsphere,nn,ik,maxnobjcell,lnfil,maxnfilpoints,lxPeriodic,&
+INTEGER :: lni,lnj,lnim,lnjm,lnij,ij,i,j,lnsphere,nn,ik,maxnobjcell,lxPeriodic,&
            lyPeriodic
 LOGICAL :: lputobj,lread_fd_geom,lstationary,lforcedmotion,lmovingmesh,&
                   lcalcsurfforce,lcalclocalnusselt,lisotherm,ltemp_visc
@@ -441,7 +453,7 @@ IF(putobj)THEN
          (fdfcu(ij),ij=1,nij),(fdfcv(ij),ij=1,nij)
   
   READ(sres_unit)ltemp_visc
-  IF(ltemp_visc /= temp_visc)THEN
+  IF(ltemp_visc .NEQV. temp_visc)THEN
     WRITE(out_unit,*)'fd_problem_restart: restart file inconsistency in viscosity dependant switches.'
     STOP
   ENDIF
@@ -449,9 +461,9 @@ IF(putobj)THEN
   READ(sres_unit)lputobj,lread_fd_geom,lstationary,lforcedmotion,lmovingmesh,&
                   lcalcsurfforce,lcalclocalnusselt,lisotherm
 
-  IF(lputobj /= putobj .OR. lread_fd_geom /= read_fd_geom .OR. lstationary /= stationary .OR. &
-     lforcedmotion /= forcedmotion .OR. lmovingmesh /= movingmesh .OR. lcalcsurfforce /= calcsurfforce .OR. &
-     lcalclocalnusselt /= calclocalnusselt .OR. lisotherm /= isotherm)THEN
+  IF(lputobj .NEQV. putobj .OR. lread_fd_geom .NEQV. read_fd_geom .OR. lstationary .NEQV. stationary .OR. &
+     lforcedmotion .NEQV. forcedmotion .OR. lmovingmesh .NEQV. movingmesh .OR. lcalcsurfforce .NEQV. calcsurfforce .OR. &
+     lcalclocalnusselt .NEQV. calclocalnusselt .OR. lisotherm .NEQV. isotherm)THEN
       WRITE(out_unit,*)'fd_problem_restart: restart file inconsistency in lagrangian switches.'
       STOP
   ENDIF
@@ -593,40 +605,6 @@ IF(putobj)THEN
 
     ENDDO
         
-  ENDIF
-
-  IF(nfil > 0)THEN
-
-    READ(sres_unit)lnfil,filgravx,filgravy,filfr,filalpha,filbeta,filgamma
-    IF(lnfil /= nfil)THEN
-      WRITE(out_unit,*)'fd_problem_restart: restart file inconsistency in the number of objects.'
-      STOP
-    ENDIF
-    
-    !CALL fd_alloc_filprop_arrays(alloc_create)      
-    READ(sres_unit)(nfilpoints(nn),nn=1,nfil),(densitfil(nn),nn=1,nfil),&
-                    (filbenrig(nn),nn=1,nfil),(fillen(nn),nn=1,nfil),&
-                    (fillenc(nn),nn=1,nfil),(filfirstposx(nn),nn=1,nfil),&
-                    (filfirstposy(nn),nn=1,nfil),(fillasttheta(nn),nn=1,nfil)
-    
-    maxnfilpoints = MAXVAL(nfilpoints(:),1)
-    CALL fd_alloc_filwork_arrays(alloc_create,maxnfilpoints)
-    CALL fd_alloc_filgeom_arrays(alloc_create,maxnfilpoints)
-    DO nn=1,nfil
-      READ(sres_unit)(filpointx(i,nn),i=1,nfilpoints(nn)),(filpointy(i,nn),i=1,nfilpoints(nn)),&
-                      (filpointyo(i,nn),i=1,nfilpoints(nn)),(filpointxo(i,nn),i=1,nfilpoints(nn)),&
-                      (filten(i,nn),i=1,nfilpoints(nn)),(filds(i,nn),i=1,nfilpoints(nn)),&
-                      (filpointxpen(i,nn),i=1,nfilpoints(nn)),(filpointypen(i,nn),i=1,nfilpoints(nn)),&
-                      (filru(i,nn),i=1,nfilpoints(nn)),(filrv(i,nn),i=1,nfilpoints(nn)),&
-                      (filintegfx(i,nn),i=1,nfilpoints(nn)),(filintegfy(i,nn),i=1,nfilpoints(nn)),&
-                      (filcintegfx(i,nn),i=1,nfilpoints(nn)),(filcintegfy(i,nn),i=1,nfilpoints(nn)),&
-                      (filpoint_cvx(i,nn),i=1,nfilpoints(nn)),(filpoint_cvy(i,nn),i=1,nfilpoints(nn))
-      DO i = 1,nfilpoints(nn)
-        READ(sres_unit)(filpoint_interpx(j,i,nn),j=1,2),(filpoint_interpy(j,i,nn),j=1,2)
-      ENDDO
-    ENDDO
-
-    READ(sres_unit)(ibsu(ij),ij=1,nij),(ibsv(ij),ij=1,nij)
   ENDIF
 
 ELSE
@@ -1057,8 +1035,8 @@ SUBROUTINE fd_alloc_sources(create_or_destroy)
 
 USE parameters,             ONLY : alloc_create,alloc_destroy,out_unit
 USE shared_data,            ONLY : fdsu,fdsv,nij,fdsub,fdsvb,fdst,&
-                                   fdsuc,fdsvc,fdstc,nfil,ibsu,ibsv,&
-                                   fdfcu,fdfcv
+                                   fdsuc,fdsvc,fdstc,&
+                                   fdfcu,fdfcv,rigidForce_contrib
 USE real_parameters,        ONLY : zero
 
 IMPLICIT NONE
@@ -1067,12 +1045,7 @@ INTEGER                 :: ierror
 
 IF(create_or_destroy == alloc_create)THEN
   ALLOCATE(fdsu(nij),fdsv(nij),fdsub(nij),fdsvb(nij),fdsuc(nij),fdsvc(nij),&
-            fdst(nij),fdstc(nij),fdfcu(nij),fdfcv(nij),STAT=ierror)
-  IF(nfil > 0)THEN
-    ALLOCATE(ibsu(nij),ibsv(nij),STAT=ierror)
-    ibsu = zero
-    ibsv = zero
-  ENDIF
+            fdst(nij),fdstc(nij),fdfcu(nij),fdfcv(nij),rigidForce_contrib(nij),STAT=ierror)
   IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate working arrays.'
   fdsu = zero
   fdsv = zero
@@ -1084,9 +1057,9 @@ IF(create_or_destroy == alloc_create)THEN
   fdstc =zero
   fdfcu = zero
   fdfcv = zero
+  rigidForce_contrib = 0
 ELSEIF(create_or_destroy == alloc_destroy)THEN
-  DEALLOCATE(fdsu,fdsv,fdsub,fdsvb,fdst,fdsuc,fdsvc,fdfcu,fdfcv)
-  IF(nfil>0)DEALLOCATE(ibsu,ibsv)
+  DEALLOCATE(fdsu,fdsv,fdsub,fdsvb,fdst,fdsuc,fdsvc,fdfcu,fdfcv,rigidForce_contrib)
 ENDIF
 
 END SUBROUTINE fd_alloc_sources
@@ -1122,88 +1095,6 @@ ELSEIF(create_or_destroy == alloc_destroy)THEN
 ENDIF
 
 END SUBROUTINE fd_alloc_objcell_vars
-
-SUBROUTINE fd_alloc_filprop_arrays(create_or_destroy)
-
-USE parameters,       ONLY : alloc_create,alloc_destroy,out_unit
-USE shared_data,      ONLY : nfil,densitfil,filbenrig,nfilpoints,fillen,fillenc,&
-                             fillasttheta,filfirstposx,filfirstposy
-USE real_parameters,  ONLY : zero
-
-IMPLICIT NONE
-
-INTEGER,INTENT(IN)      :: create_or_destroy
-INTEGER                 :: ierror
-
-IF(create_or_destroy == alloc_create)THEN
-  ALLOCATE(densitfil(nfil),filbenrig(nfil),nfilpoints(nfil),fillen(nfil),fillenc(nfil),&
-           filfirstposx(nfil),filfirstposy(nfil),fillasttheta(nfil),STAT=ierror)
-  IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate filament arrays.'
-  densitfil = zero;filbenrig = zero;fillen = zero;fillenc = zero
-  filfirstposx = zero;filfirstposy = zero;fillasttheta = zero
-  nfilpoints = 0
-ELSEIF(create_or_destroy == alloc_destroy)THEN
-  DEALLOCATE(densitfil,filbenrig,nfilpoints,fillen,fillenc,filfirstposx,filfirstposy,fillasttheta)
-ENDIF
-
-END SUBROUTINE fd_alloc_filprop_arrays
-
-SUBROUTINE fd_alloc_filwork_arrays(create_or_destroy,maxpoints)
-
-USE parameters,       ONLY : alloc_create,alloc_destroy,out_unit
-USE shared_data,      ONLY : filap,filaw,filae,filst,filsx,filsy
-USE real_parameters,  ONLY : zero
-
-IMPLICIT NONE
-
-INTEGER,INTENT(IN)      :: create_or_destroy,maxpoints
-INTEGER                 :: ierror
-
-IF(create_or_destroy == alloc_create)THEN
-  ALLOCATE(filap(maxpoints),filaw(maxpoints),filae(maxpoints),filst(maxpoints),filsx(maxpoints),filsy(maxpoints),STAT=ierror)
-  IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate filament arrays.'
-  filap = zero; filaw = zero; filae = zero; filst = zero; filsx = zero; filsy = zero
-ELSEIF(create_or_destroy == alloc_destroy)THEN
-  DEALLOCATE(filap,filaw,filae,filst,filsx,filsy)
-ENDIF
-
-END SUBROUTINE fd_alloc_filwork_arrays
-
-SUBROUTINE fd_alloc_filgeom_arrays(create_or_destroy,maxpoints)
-
-USE parameters,       ONLY : alloc_create,alloc_destroy,out_unit
-USE shared_data,      ONLY : filpointx,filpointy,filpointyo,filpointxo,&
-                             filten,filds,filpointxpen,filpointypen,filu,filv,&
-                             filru,filrv,filfx,filfy,filintegfx,filintegfy,nfil,&
-                             filpoint_cvy,filpoint_cvx,filcintegfx,filcintegfy,&
-                             filpoint_interpx,filpoint_interpy
-USE real_parameters,  ONLY : zero
-
-IMPLICIT NONE
-
-INTEGER,INTENT(IN)      :: create_or_destroy,maxpoints
-INTEGER                 :: ierror
-
-IF(create_or_destroy == alloc_create)THEN
-  ALLOCATE(filpointx(maxpoints,nfil),filpointy(maxpoints,nfil),filpointyo(maxpoints,nfil),filpointxo(maxpoints,nfil),&
-           filten(maxpoints,nfil),filds(maxpoints,nfil),filpointxpen(maxpoints,nfil),filpointypen(maxpoints,nfil),&
-           filu(maxpoints,nfil),filv(maxpoints,nfil),filru(maxpoints,nfil),filrv(maxpoints,nfil),filfx(maxpoints,nfil),&
-           filfy(maxpoints,nfil),filintegfx(maxpoints,nfil),filintegfy(maxpoints,nfil),filpoint_cvx(maxpoints,nfil),&
-           filpoint_cvy(maxpoints,nfil),filcintegfx(maxpoints,nfil),filcintegfy(maxpoints,nfil),&
-           filpoint_interpx(2,maxpoints,nfil),filpoint_interpy(2,maxpoints,nfil),STAT=ierror)
-  IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate filament arrays.'
-  filpointx = zero;filpointy = zero;filpointyo = zero;filpointxo = zero
-  filten = zero;filds = zero;filpointxpen = zero;filpointypen = zero;filu = zero;filv = zero
-  filru = zero;filrv = zero;filfx = zero;filfy = zero;filintegfx = zero;filintegfy = zero
-  filcintegfx = zero;filcintegfy = zero
-  filpoint_interpx = 0;filpoint_interpy = 0
-ELSEIF(create_or_destroy == alloc_destroy)THEN
-  DEALLOCATE(filpointx,filpointy,filpointyo,filpointxo,filten,filds,filpointxpen,filpointypen,filu,filv,&
-             filru,filrv,filfx,filfy,filintegfx,filintegfy,filpoint_cvy,filpoint_cvx,filcintegfx,filcintegfy,&
-             filpoint_interpx,filpoint_interpy)
-ENDIF
-
-END SUBROUTINE fd_alloc_filgeom_arrays
 
 SUBROUTINE fd_write_restart
 
@@ -1349,33 +1240,6 @@ INTEGER       :: ij,nn,ik,i,j
 
     ENDDO
         
-  ENDIF
-
-  IF(nfil > 0)THEN
-
-    WRITE(eres_unit)nfil,filgravx,filgravy,filfr,filalpha,filbeta,filgamma
-
-    WRITE(eres_unit)(nfilpoints(nn),nn=1,nfil),(densitfil(nn),nn=1,nfil),&
-                    (filbenrig(nn),nn=1,nfil),(fillen(nn),nn=1,nfil),&
-                    (fillenc(nn),nn=1,nfil),(filfirstposx(nn),nn=1,nfil),&
-                    (filfirstposy(nn),nn=1,nfil),(fillasttheta(nn),nn=1,nfil)
-
-    DO nn=1,nfil
-      WRITE(eres_unit)(filpointx(i,nn),i=1,nfilpoints(nn)),(filpointy(i,nn),i=1,nfilpoints(nn)),&
-                      (filpointyo(i,nn),i=1,nfilpoints(nn)),(filpointxo(i,nn),i=1,nfilpoints(nn)),&
-                      (filten(i,nn),i=1,nfilpoints(nn)),(filds(i,nn),i=1,nfilpoints(nn)),&
-                      (filpointxpen(i,nn),i=1,nfilpoints(nn)),(filpointypen(i,nn),i=1,nfilpoints(nn)),&
-                      (filru(i,nn),i=1,nfilpoints(nn)),(filrv(i,nn),i=1,nfilpoints(nn)),&
-                      (filintegfx(i,nn),i=1,nfilpoints(nn)),(filintegfy(i,nn),i=1,nfilpoints(nn)),&
-                      (filcintegfx(i,nn),i=1,nfilpoints(nn)),(filcintegfy(i,nn),i=1,nfilpoints(nn)),&
-                      (filpoint_cvx(i,nn),i=1,nfilpoints(nn)),(filpoint_cvy(i,nn),i=1,nfilpoints(nn))
-      DO i = 1,nfilpoints(nn)
-        WRITE(eres_unit)(filpoint_interpx(j,i,nn),j=1,2),(filpoint_interpy(j,i,nn),j=1,2)
-      ENDDO
-
-    ENDDO
-
-    WRITE(eres_unit)(ibsu(ij),ij=1,nij),(ibsv(ij),ij=1,nij)
   ENDIF
 
 END SUBROUTINE fd_write_restart

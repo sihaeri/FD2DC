@@ -5,8 +5,8 @@ INTEGER,PARAMETER       :: nphi = 4
 INTEGER,PARAMETER       :: max_char_len = 20
 
 !--File units
-INTEGER,PARAMETER       :: set_unit = 1 !--Problem setup file
-INTEGER,PARAMETER       :: out_unit = set_unit + 1 !--OUtput information at each iteration
+INTEGER,PARAMETER       :: set_unit = 500 !--Problem setup file
+INTEGER,PARAMETER       :: out_unit = set_unit + 1 !--Output information at each iteration
 INTEGER,PARAMETER       :: grd_unit = out_unit + 1 !--grid file
 INTEGER,PARAMETER       :: sres_unit = grd_unit + 3240 !--read restart file
 INTEGER,PARAMETER       :: eres_unit = sres_unit + 1 !--write restart file
@@ -35,7 +35,7 @@ INTEGER,PARAMETER       :: maxmove = 10
 INTEGER,PARAMETER       :: do_collect_stat = 1
 INTEGER,PARAMETER       :: end_collect_stat = do_collect_stat + 1
 
-INTEGER,PARAMETER       :: subTimeStep = 5
+INTEGER,PARAMETER       :: subTimeStep = 20
 
 INTEGER,PARAMETER       :: use_GPU_no  = 0
 INTEGER,PARAMETER       :: use_GPU_yes = use_GPU_no + 1
@@ -46,4 +46,15 @@ INTEGER,PARAMETER       :: OPSUCCESS = 0
 INTEGER,PARAMETER       :: SOLVER_DONE = 1
 
 INTEGER,PARAMETER       :: OUTER_ITR_DONE = -1
+
+!--LAMMPS
+INTEGER,PARAMETER       :: use_LAMMPS_no = 0
+INTEGER,PARAMETER       :: use_LAMMPS_yes = use_LAMMPS_no + 1
+INTEGER,PARAMETER       :: RANK_ONE = 1
+INTEGER,PARAMETER       :: RANK_THREE = 3
+CHARACTER(LEN = *),DIMENSION(4),PARAMETER :: LMP_COMMANDS=(/'atom_style sphere              ',&
+                                                            'dimension 2                    ',&
+                                                            'newton off                     ',&
+                                                            'comm_modify mode single vel yes'/)
+
 END MODULE parameters

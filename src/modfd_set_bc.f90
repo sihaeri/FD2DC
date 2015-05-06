@@ -8,7 +8,8 @@ CONTAINS
 SUBROUTINE fd_bctime(nt)
 
 USE precision,    ONLY : r_single
-USE shared_data,  ONLY : nim,li,nj,om,time,ulid,u,flomas,flomom,densit,f1,y,r,duct,njm,ulid,ndt,ft1,cpf,ft1
+USE shared_data,  ONLY : nim,li,nj,om,time,ulid,u,flomas,flomom,densit,f1,y,r,duct,njm,ulid,ndt,ft1,cpf,ft1,&
+                         ni
 USE real_parameters, ONLY : zero,one,half
 
 IMPLICIT NONE
@@ -37,6 +38,10 @@ ELSE
   DO i=2,nim
     ij=li(i)+nj
     u(ij)=ulid !*sin(om*time)
+  END DO
+  DO i=2,nim
+    ij=li(i)+1
+    u(ij)=-ulid !*sin(om*time)
   END DO
 ENDIF
 

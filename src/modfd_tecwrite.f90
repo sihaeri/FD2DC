@@ -7,7 +7,7 @@ CONTAINS
 SUBROUTINE fd_tecwrite_eul(tec_unit,extra_Var)
 
 USE precision,      ONLY : r_single
-USE shared_data,    ONLY : title,nim,njm,xc,u,v,p,yc,li,t,x,y,den,celbeta,celcp,celkappa,nij
+USE shared_data,    ONLY : title,nim,njm,xc,u,v,p,yc,li,t,x,y,den,celbeta,celcp,celkappa,nij,time
 USE parameters,     ONLY : max_len_tecline
 
 IMPLICIT NONE
@@ -24,12 +24,14 @@ IF(PRESENT(extra_var))THEN
   variableline = 'VARIABLES ="x", "y", "u", "v", "p" ,"t", "den", "beta", "cp", "kappa", "extra"'
   WRITE(tec_unit,*)TRIM(variableline)
   WRITE(tec_unit,'(A,I5,A,I5)')'ZONE DATAPACKING=BLOCK, VARLOCATION = ([3,4,5,6,7,8,9,10,11]=CELLCENTERED), I=',nim, ',J=',njm
+  WRITE(tec_unit,'(A,F16.9)')'STRANDID=1, SOLUTIONTIME=',time
 
 ELSE
 
   variableline = 'VARIABLES ="x", "y", "u", "v", "p" ,"t", "den", "beta", "cp" , "kappa" '
   WRITE(tec_unit,*)TRIM(variableline)
   WRITE(tec_unit,'(A,I5,A,I5)')'ZONE DATAPACKING=BLOCK, VARLOCATION = ([3,4,5,6,7,8,9,10]=CELLCENTERED), I=',nim, ',J=',njm
+  WRITE(tec_unit,'(A,F16.9)')'STRANDID=1, SOLUTIONTIME=',time
 
 ENDIF
 DO j = 1,njm
@@ -113,7 +115,7 @@ END SUBROUTINE fd_tecwrite_eul
 SUBROUTINE fd_tecwrite_fil(tec_unit,nfil,npoints,posx,posy,u,v)
 
 USE precision,      ONLY : r_single
-USE shared_data,    ONLY : title
+USE shared_data,    ONLY : title,time
 
 IMPLICIT NONE
 
@@ -127,6 +129,7 @@ WRITE(tec_unit,9012)
 
 DO n=1,nfil
   WRITE(tec_unit,9013)npoints(n)
+  WRITE(tec_unit,'(A,F16.9)')'STRANDID=1, SOLUTIONTIME=',time
   DO j=1,npoints(n)
     WRITE(tec_unit,9015) posx(j,n),posy(j,n),u(j,n),v(j,n)
   ENDDO
@@ -143,7 +146,7 @@ END SUBROUTINE fd_tecwrite_fil
 SUBROUTINE fd_tecwrite_sph_v(tec_unit,nsphere,nobjcells,vertx,verty,zcellx,zcelly,zvertx,zverty)
 
 USE precision,      ONLY : r_single
-USE shared_data,    ONLY : title,LDomainx,LDomainy
+USE shared_data,    ONLY : title,LDomainx,LDomainy,time
 
 IMPLICIT NONE
 
@@ -195,6 +198,8 @@ DO n = 1,nsphere
     IF(nspzone(nz,n) /= 0)THEN  
       WRITE(tec_unit,*)'ZONE T=Test,DATAPACKING=POINT,NODES=',4*nspzone(nz,n),&
                    ',ELEMENTS=',nspzone(nz,n),',ZONETYPE=FEQUADRILATERAL,'
+      WRITE(tec_unit,'(A,F16.9)')'STRANDID=1, SOLUTIONTIME=',time
+
       DO j=1,nspzone(nz,n)
         jj = spzone(nz,j,n)
         xx = vertx(1,jj,n)+(zvertx(1,jj,n) - zcellx(jj,n))*LDomainx
@@ -241,7 +246,7 @@ END SUBROUTINE fd_tecwrite_sph_v
 SUBROUTINE fd_tecwrite_sph_s(tec_unit,nsphere,nsurfpoints,posx,posy,zonex,zoney)
 
 USE precision,      ONLY : r_single
-USE shared_data,    ONLY : title
+USE shared_data,    ONLY : title,time
 
 IMPLICIT NONE
 
@@ -288,6 +293,7 @@ DO n=1,nsphere
   DO nz = 1,4
     IF(nspzone(nz,n) > 0)THEN
       WRITE(tec_unit,9013)nspzone(nz,n)
+      WRITE(tec_unit,'(A,F16.9)')'STRANDID=1, SOLUTIONTIME=',time
       DO j=1,nspzone(nz,n)
         WRITE(tec_unit,9015) posx(spzone(nz,j,n),n),posy(spzone(nz,j,n),n)
       ENDDO

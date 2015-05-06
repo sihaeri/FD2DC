@@ -20,11 +20,16 @@ USE shared_data,        ONLY : urf,ip,p,su,apu,apv,nim,njm,&
                                dux,duy,dvx,dvy,fdsuc,fdsvc,fdsub,fdsvb,putobj,&
                                Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,ct1,ct2,ct3,&
-                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celcp,use_GPU
+                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celcp,use_GPU,&
+                               handle, config, platformOpts, formatOpts, solverOpts, precondOpts, res, culaStat
+
+use cula_sparse_type
+use cula_sparse
+
 USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual,&
                                     fd_solve_cgs2d,fd_cooVal_create
-USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGSTAB_itr,&
-                                 cu_cpD2H_solDP
+!USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGSTAB_itr,&
+!                                 cu_cpD2H_solDP
 IMPLICIT NONE
 REAL(KIND = r_single) :: fxe,fxp,dxpe,s,d,fyn,fyp,dypn,&
                          dx,dy,rp,ppe,ppw,ppn,pps,dpxel,&
@@ -157,30 +162,40 @@ IF(solver_type == solver_sparsekit)THEN
     
     CALL fd_cooVal_create(ap,as,an,aw,ae,su,pp)
 
-    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
-    IF(error /= OPSUCCESS)GOTO 100
-    
-    CALL cu_BiCGSTAB_setStop(nsw(ip),sor(ip),error)
-    IF(error /= OPSUCCESS)GOTO 100
-    
-    CALL  cu_BiCGSTAB_itr(resor(ip),ipar(1),error)
-    IF(error /= SOLVER_DONE)GOTO 100
-    
-    CALL  cu_cpD2H_solDP(sol,error)
-    IF(error /= OPSUCCESS)GOTO 100
-    
-    CALL copy_solution(pp,sol)
+    config%relativeTolerance = sor(ip)
+    config%maxIterations = nsw(ip)
+    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
+                                solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)   
 
-    100 CONTINUE
-    IF(error == SOLVER_FAILED)THEN
-      WRITE(*,*)'GPU--Pressure solver failed to find solution.'
-!      PAUSE
-!      STOP
-    ELSEIF(error /= OPSUCCESS)THEN
-      WRITE(*,*)'GPU--Pressure solver problem in CUDA operations.'
-      PAUSE
+!    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
+!    IF(error /= OPSUCCESS)GOTO 100
+    
+!    CALL cu_BiCGSTAB_setStop(nsw(ip),sor(ip),error)
+!    IF(error /= OPSUCCESS)GOTO 100
+    
+!    CALL  cu_BiCGSTAB_itr(resor(ip),ipar(1),error)
+!    IF(error /= SOLVER_DONE)GOTO 100
+    
+!    CALL  cu_cpD2H_solDP(sol,error)
+!    IF(error /= OPSUCCESS)GOTO 100
+   
+    IF(culaStat /= culaSparseNoError)THEN
+      WRITE(*,*)'CULA encoutered an error.'
+      culaStat=culaSparseDestroy(handle)
       STOP
     ENDIF
+
+    CALL copy_solution(pp,sol)
+!    100 CONTINUE
+!    IF(error == SOLVER_FAILED)THEN
+!      WRITE(*,*)'GPU--Pressure solver failed to find solution.'
+!      STOP
+!      STOP
+!    ELSEIF(error /= OPSUCCESS)THEN
+!      WRITE(*,*)'GPU--Pressure solver problem in CUDA operations.'
+!      STOP
+!      STOP
+!    ENDIF
   ELSE
       
       CALL fd_cooVal_create(ap,as,an,aw,ae,su,pp)
@@ -202,8 +217,7 @@ IF(solver_type == solver_sparsekit)THEN
           !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
           !                       WORK,Acsr,Aclc,Arwc)
       CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
-                            WORK, Acsr,Aclc,Arwc,        &
-    	                         NNZ,  Alu,Jlu,Ju,Jw          )
+                            WORK, Acsr,Aclc,Arwc,NNZ,Alu,Jlu,Ju,Jw)
    
      CALL copy_solution(pp,sol)
 

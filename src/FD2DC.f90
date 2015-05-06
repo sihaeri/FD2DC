@@ -8,18 +8,19 @@ USE modfd_problem_setup, ONLY : fd_problem_setup,fd_problem_restart,fd_copy_time
 USE shared_data,         ONLY : lread,itim,itst,louts,lcal,iu,iv,ip,ien,u,p,v,t,ltime,time,minit,&
                                 maxit,u,v,p,t,resor,nprt, filenum,problem_name,problem_len,&
                                 imon,jmon,slarge,sormax,ni,nj,loute,lwrite,nim,njm,nij,&
-                                x,y,xc,yc,li,f1,f2,ft1,ft2,vo,uo,to,putobj,dt,duct,filnprt,spherenum,isotherm,objtp,&
-                                nfil,nfilpoints,filpointx,filpointy,filru,filrv,calcsurfforce,&
+                                x,y,xc,yc,li,f1,f2,ft1,ft2,vo,uo,to,putobj,dt,duct,spherenum,isotherm,objtp,&
+                                calcsurfforce,&
                                 calcwalnusselt_ave,naverage_wsteps,xPeriodic,zsurfpointx,zsurfpointy,&
                                 zobjcellx,zobjcelly,zobjcellvertx,zobjcellverty,&
                                 localnusselt,calclocalnusselt,nusseltcentx,nusseltcenty,nnusseltpoints,&
-                                nsphere,nfil,filfirstposy,sphnprt,surfpointx,surfpointy,objcellx,objcelly,&
+                                nsphere,sphnprt,surfpointx,surfpointy,objcellx,objcelly,&
                                 nobjcells,nsurfpoints,objcellvertx,objcellverty,objcentu,objcentv,objcentx,&
                                 objcenty,stationary,th,movingmesh,dxmeanmoved,dxmean,dxmeanmovedtot,&
                                 lamvisc,temp_visc,tc,ulid,objradius,naverage_steps,calclocalnusselt_ave,objcentom,&
-                                voo,uoo,den,deno,denoo,celbeta,celcp,celcpo,celcpoo,celkappa,too,calcwalnusselt,use_gpu,initFromFile
+                                voo,uoo,den,deno,denoo,celbeta,celcp,celcpo,celcpoo,celkappa,too,calcwalnusselt,use_gpu,&
+                                use_lammps,initFromFile
 USE parameters,          ONLY : out_unit,eres_unit,plt_unit,force_predict,force_correct,do_collect_stat,end_collect_stat,&
-                                use_GPU_yes,no_force,OUTER_ITR_DONE
+                                use_GPU_yes,no_force,OUTER_ITR_DONE,USE_LAMMPS_YES
 USE modfd_set_bc,        ONLY : fd_bctime,fd_bcout
 USE modfd_calc_pre,      ONLY : fd_calc_pre
 USE modfd_calc_temp,     ONLY : fd_calc_temp
@@ -27,11 +28,11 @@ USE modfd_calc_mom,      ONLY : fd_calc_mom
 USE mod_create_filenum,  ONLY : create_filenum
 USE modfd_calc_integrals,ONLY : fd_calc_integrals,fd_calc_surf_force,fd_calc_surf_nusselt,fd_calc_wall_nusselt,&
                                 fd_calc_lwall_nusselt,fd_calc_surf_nusselt_ave,fd_calc_lwall_nusselt_ave
-USE modfd_tecwrite,      ONLY : fd_tecwrite_eul,fd_tecwrite_fil,fd_tecwrite_sph_v,fd_tecwrite_sph_s
+USE modfd_tecwrite,      ONLY : fd_tecwrite_eul,fd_tecwrite_sph_v,fd_tecwrite_sph_s
 USE modfd_create_geom,   ONLY : fd_calc_sources,fd_calc_mi,fd_calc_ori,fd_calc_pos,fd_calc_physprops,fd_copy_oldvel,&
                                 fd_move_mesh,fd_calculate_stats,fd_calc_part_collision
-USE modfil_create_geom,  ONLY : fil_sol_tension,fil_sol_positions,fil_calc_sources
-USE modcu_BiCGSTAB,      ONLY : cu_shutdown
+!USE modcu_BiCGSTAB,      ONLY : cu_shutdown
+USE modlmp_particle,     ONLY : lmp_calc_pos
 use omp_lib
 IMPLICIT NONE
 LOGICAL         :: ismoved
@@ -64,13 +65,7 @@ l = 0
 
 IF(ltime .AND. lwrite)THEN
   IF(putobj)THEN
-    IF(nfil > 0 .AND. nsphere > 0)THEN
-      maxfl = MAX(itime/nprt,itime/filnprt,itime/sphnprt)
-    ELSEIF(nfil > 0 .AND. nsphere == 0)THEN
-      maxfl = MAX(itime/nprt,itime/filnprt)
-    ELSEIF(nfil == 0 .AND. nsphere > 0)THEN
-      maxfl = MAX(itime/nprt,itime/sphnprt)
-    ENDIF
+    maxfl = MAX(itime/nprt,itime/sphnprt)
     ALLOCATE(filenum(maxfl))
     CALL create_filenum(maxfl,filenum)
     IF(nsphere > 0)THEN
@@ -90,6 +85,7 @@ IF(initFromFile)THEN
   CALL fd_calc_sources(no_force,dummy,0)
   CALL fd_copy_oldvel
 ENDIF
+
 timeloop: DO itim = itims,itime
 
   CALL fd_calc_timeCoefs
@@ -117,7 +113,6 @@ timeloop: DO itim = itims,itime
   IF(ltime) CALL fd_bctime(itim-itims+1)
   IF(putobj)THEN
     !IF(nsphere>0)CALL fd_calc_sources(force_correct,fd_resor,0)
-    IF(nfil>0 )CALL fil_calc_sources(delt1,vb_resor,0)
   ENDIF
   !--OUTER ITERATIONS (SIMPLE RELAXATIONS)
 
@@ -133,7 +128,6 @@ timeloop: DO itim = itims,itime
     IF(temp_visc)CALL fd_update_visc
     IF(putobj)THEN
       IF(nsphere>0)CALL fd_calc_sources(force_correct,fd_resor,iter)
-      IF(nfil>0)CALL fil_calc_sources(delt1,vb_resor,iter)
     ENDIF
 !    T2 = omp_get_wtime()
 !    OPEN(UNIT = 12345,FILE='TIME.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
@@ -149,41 +143,7 @@ timeloop: DO itim = itims,itime
     ENDIF
     IF(source < sormax .AND. iter > minit) EXIT
   END DO
-  
-  IF(nfil > 0)THEN
-    !CALL fil_sol_tension
-    !CALL fil_sol_positions
-  ENDIF
 
-  IF(nsphere > 0)THEN
-   !CALL fd_calc_surf_force(densref,0.1,1.0)
-     CALL fd_calc_ori
-     CALL fd_calc_pos(OUTER_ITR_DONE,itim-itims+1)
-     CALL fd_calc_mi
-   IF(.NOT. stationary)THEN
-     IF(lwrite)THEN
-       DO nn = 1,nsphere
-         OPEN(1234,FILE='vel_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-         OPEN(1235,FILE='pos_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-         IF(.NOT. isotherm)THEN
-           OPEN(1236,FILE='temp_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-           WRITE(1236,*)objtp(nn)
-           CLOSE(1236)
-         ENDIF
-         WRITE(1234,*)objcentom(nn),objcentu(nn),objcentv(nn) !
-         WRITE(1235,*)objcentx(nn)-dxmeanmovedtot,objcenty(nn)
-         CLOSE(1234);CLOSE(1235)
-       ENDDO
-     ENDIF
-   ENDIF
-   CALL fd_calc_physprops(OUTER_ITR_DONE)
-   IF(nsphere > 0 .AND. movingmesh)CALL fd_move_mesh(ismoved)
-   IF(stationary)THEN
-     CALL fd_calc_sources(force_correct,fd_resor,iter)
-   ELSE
-     CALL fd_calc_sources(force_predict,fd_resor,iter)
-   ENDIF
-  ENDIF
   !--CONVERGED: IF UNSTEADY FLOW, PRINT AND SAVE NPRTth SOLUTION
   IF((.NOT.ltime).OR.(ltime.AND.MOD(itim,nprt)==0)) THEN
     IF(loute) THEN
@@ -240,13 +200,41 @@ timeloop: DO itim = itims,itime
       CLOSE(plt_unit)
     ENDIF
   ENDIF
-  IF(nfil > 0)THEN
-    IF((ltime.AND.MOD(itim,filnprt)==0)) THEN
-      m = m +1
-      OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//filenum(m)//'_fil.plt',STATUS='NEW')
-      CALL fd_tecwrite_fil(plt_unit,nfil,nfilpoints,filpointx,filpointy,filru,filrv)
-      CLOSE(plt_unit)
-    ENDIF
+
+  IF(nsphere > 0)THEN
+   !CALL fd_calc_surf_force(densref,0.1,1.0)
+     IF(use_lammps == use_lammps_yes)THEN
+       CALL fd_calc_ori
+       CALL lmp_calc_pos(OUTER_ITR_DONE,itim-itims+1)
+       CALL fd_calc_mi 
+     ELSE
+       CALL fd_calc_ori
+       CALL fd_calc_pos(OUTER_ITR_DONE,itim-itims+1)
+       CALL fd_calc_mi
+     ENDIF
+   IF(.NOT. stationary)THEN
+     IF(lwrite)THEN
+       DO nn = 1,nsphere
+         OPEN(1234,FILE='vel_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+         OPEN(1235,FILE='pos_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+         IF(.NOT. isotherm)THEN
+           OPEN(1236,FILE='temp_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+           WRITE(1236,*)objtp(nn)
+           CLOSE(1236)
+         ENDIF
+         WRITE(1234,*)objcentom(nn),objcentu(nn),objcentv(nn) !
+         WRITE(1235,*)objcentx(nn)-dxmeanmovedtot,objcenty(nn)
+         CLOSE(1234);CLOSE(1235)
+       ENDDO
+     ENDIF
+   ENDIF
+   CALL fd_calc_physprops(OUTER_ITR_DONE)
+   IF(nsphere > 0 .AND. movingmesh)CALL fd_move_mesh(ismoved)
+   IF(stationary)THEN
+     CALL fd_calc_sources(force_correct,fd_resor,iter)
+   ELSE
+     CALL fd_calc_sources(force_predict,fd_resor,iter)
+   ENDIF
   ENDIF
   !IF( time*ulid/objradius(1) > 90.0)CALL fd_calculate_stats(1,do_collect_stat) 
   !CALL fd_calculate_stats(1,do_collect_stat)
@@ -333,7 +321,7 @@ ELSE
 ENDIF
 
 
-IF(use_GPU == use_GPU_yes)CALL cu_shutdown(err)
+!IF(use_GPU == use_GPU_yes)CALL cu_shutdown(err)
 
 600 FORMAT(1X,'ITER.',3X,&
            'I---------ABSOLUTE RESIDUAL SOURCE SUMS--------I',3X,&
