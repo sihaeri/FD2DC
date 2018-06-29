@@ -33,9 +33,9 @@ USE shared_data,         ONLY : lread,itim,itst,louts,lcal,iu,iv,ip,ien,u,p,v,t,
                                 objcenty,stationary,th,movingmesh,dxmeanmoved,dxmean,dxmeanmovedtot,&
                                 lamvisc,temp_visc,tc,ulid,objradius,naverage_steps,calclocalnusselt_ave,objcentom,&
                                 voo,uoo,den,deno,denoo,celbeta,celcp,celcpo,celcpoo,celkappa,too,calcwalnusselt,use_gpu,&
-                                use_lammps,initFromFile
+                                initFromFile
 USE parameters,          ONLY : out_unit,eres_unit,plt_unit,force_predict,force_correct,do_collect_stat,end_collect_stat,&
-                                use_GPU_yes,no_force,OUTER_ITR_DONE,USE_LAMMPS_YES
+                                use_GPU_yes,no_force,OUTER_ITR_DONE
 USE modfd_set_bc,        ONLY : fd_bctime,fd_bcout
 USE modfd_calc_pre,      ONLY : fd_calc_pre
 USE modfd_calc_temp,     ONLY : fd_calc_temp
@@ -47,7 +47,6 @@ USE modfd_tecwrite,      ONLY : fd_tecwrite_eul,fd_tecwrite_sph_v,fd_tecwrite_sp
 USE modfd_create_geom,   ONLY : fd_calc_sources,fd_calc_mi,fd_calc_ori,fd_calc_pos,fd_calc_physprops,fd_copy_oldvel,&
                                 fd_move_mesh,fd_calculate_stats,fd_calc_part_collision
 !USE modcu_BiCGSTAB,      ONLY : cu_shutdown
-USE modlmp_particle,     ONLY : lmp_calc_pos
 use omp_lib
 IMPLICIT NONE
 LOGICAL         :: ismoved
@@ -217,39 +216,33 @@ timeloop: DO itim = itims,itime
   ENDIF
 
   IF(nsphere > 0)THEN
-   !CALL fd_calc_surf_force(densref,0.1,1.0)
-     IF(use_lammps == use_lammps_yes)THEN
-       CALL fd_calc_ori
-       CALL lmp_calc_pos(OUTER_ITR_DONE,itim-itims+1)
-       CALL fd_calc_mi 
-     ELSE
-       CALL fd_calc_ori
-       CALL fd_calc_pos(OUTER_ITR_DONE,itim-itims+1)
-       CALL fd_calc_mi
-     ENDIF
-   IF(.NOT. stationary)THEN
-     IF(lwrite)THEN
-       DO nn = 1,nsphere
-         OPEN(1234,FILE='vel_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-         OPEN(1235,FILE='pos_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-         IF(.NOT. isotherm)THEN
-           OPEN(1236,FILE='temp_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-           WRITE(1236,*)objtp(nn)
-           CLOSE(1236)
-         ENDIF
-         WRITE(1234,*)objcentom(nn),objcentu(nn),objcentv(nn) !
-         WRITE(1235,*)objcentx(nn)-dxmeanmovedtot,objcenty(nn)
-         CLOSE(1234);CLOSE(1235)
-       ENDDO
-     ENDIF
-   ENDIF
-   CALL fd_calc_physprops(OUTER_ITR_DONE)
-   IF(nsphere > 0 .AND. movingmesh)CALL fd_move_mesh(ismoved)
-   IF(stationary)THEN
-     CALL fd_calc_sources(force_correct,fd_resor,iter)
-   ELSE
-     CALL fd_calc_sources(force_predict,fd_resor,iter)
-   ENDIF
+    !CALL fd_calc_surf_force(densref,0.1,1.0)
+    CALL fd_calc_ori
+    CALL fd_calc_pos(OUTER_ITR_DONE,itim-itims+1)
+    CALL fd_calc_mi
+    IF(.NOT. stationary)THEN
+      IF(lwrite)THEN
+        DO nn = 1,nsphere
+          OPEN(1234,FILE='vel_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+          OPEN(1235,FILE='pos_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+          IF(.NOT. isotherm)THEN
+            OPEN(1236,FILE='temp_'//spherenum(nn)//'.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+            WRITE(1236,*)objtp(nn)
+            CLOSE(1236)
+          ENDIF
+          WRITE(1234,*)objcentom(nn),objcentu(nn),objcentv(nn) !
+          WRITE(1235,*)objcentx(nn)-dxmeanmovedtot,objcenty(nn)
+          CLOSE(1234);CLOSE(1235)
+        ENDDO
+      ENDIF
+    ENDIF
+    CALL fd_calc_physprops(OUTER_ITR_DONE)
+    IF(nsphere > 0 .AND. movingmesh)CALL fd_move_mesh(ismoved)
+    IF(stationary)THEN
+      CALL fd_calc_sources(force_correct,fd_resor,iter)
+    ELSE
+      CALL fd_calc_sources(force_predict,fd_resor,iter)
+    ENDIF
   ENDIF
   !IF( time*ulid/objradius(1) > 90.0)CALL fd_calculate_stats(1,do_collect_stat) 
   !CALL fd_calculate_stats(1,do_collect_stat)

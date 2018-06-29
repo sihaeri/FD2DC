@@ -328,7 +328,7 @@ CLOSE(plt_unit)
 
 END SUBROUTINE fd_create_geom
 
-SUBROUTINE fd_calc_unitvector(x1, y1, x2, y2, unitvectx, unitvecty)
+SUBROUTINE fd_calc_unitvector(x1, y1, x2, y2, unitvectx, unitvecty, veclen)
 
 USE precision,      ONLY : r_single
 USE real_parameters,ONLY : small
@@ -336,7 +336,7 @@ IMPLICIT NONE
 
 REAL(KIND = r_single),INTENT(IN) :: x1,y1,x2,y2
 REAL(KIND = r_single),INTENT(OUT):: unitvectx, unitvecty
-REAL(KIND = r_single) ::veclen
+REAL(KIND = r_single),INTENT(OUT):: veclen
 
 unitvectx = x2 - x1
 unitvecty = y2 - y1
@@ -1488,12 +1488,12 @@ IMPLICIT NONE
     DO n = 1,nsphere
       OPEN(UNIT = 1, FILE = problem_name(1:problem_len)//'_'//filenum(n+1)//'.neu', STATUS = 'OLD',IOSTAT=ierror)
       IF(ierror /= 0)GOTO 1001
-      READ(1,101),GeomName
-      READ(1,101),dummy
-      READ(1,101),dummy
-      READ(1,101),dummy
-      READ(1,101),dummy
-      READ(1,102),NUMNP,NELEM,NGRPS,NBSETS,NDFCD,NDFVL
+      READ(1,101)GeomName
+      READ(1,101)dummy
+      READ(1,101)dummy
+      READ(1,101)dummy
+      READ(1,101)dummy
+      READ(1,102)NUMNP,NELEM,NGRPS,NBSETS,NDFCD,NDFVL
       IF(NELEM > MaxNelem)MaxNelem = NELEM
       CLOSE(1)
     ENDDO
@@ -1504,13 +1504,13 @@ IMPLICIT NONE
            objpoint_interpx(2,MaxNelem,nsphere),objpoint_interpy(2,MaxNelem,nsphere)) 
     DO n = 1,nsphere
       OPEN(UNIT = 1, FILE = problem_name(1:problem_len)//'_'//filenum(n+1)//'.neu', STATUS = 'OLD',IOSTAT=ierror)
-      READ(1,101),GeomName
-      READ(1,101),dummy
-      READ(1,101),dummy
-      READ(1,101),dummy
-      READ(1,101),dummy
-      READ(1,102),NUMNP,nobjcells(n),NGRPS,NBSETS,NDFCD,NDFVL
-      READ(1,101),dummy
+      READ(1,101)GeomName
+      READ(1,101)dummy
+      READ(1,101)dummy
+      READ(1,101)dummy
+      READ(1,101)dummy
+      READ(1,102)NUMNP,nobjcells(n),NGRPS,NBSETS,NDFCD,NDFVL
+      READ(1,101)dummy
       IF(dummy .ne. 'ENDOFSECTION')THEN
         WRITE(*,*)'ERROR : Geometry Format Problem!'
         ierror = 1
@@ -1519,7 +1519,7 @@ IMPLICIT NONE
       
       dummy = ''
 
-      READ(1,101),dummy
+      READ(1,101)dummy
 
       IF(ADJUSTL(dummy) .ne. 'NODAL COORDINATES 2.3.16')THEN
         WRITE(*,*)'ERROR : Geometry Format Problem!'
@@ -1536,7 +1536,7 @@ IMPLICIT NONE
         nodePos(2,j) = y
       ENDDO
 
-      READ(1,101),dummy
+      READ(1,101)dummy
       IF(dummy .ne. 'ENDOFSECTION')THEN
         WRITE(*,*)'ERROR : Geometry Format Problem!'
         ierror = 1
@@ -1545,7 +1545,7 @@ IMPLICIT NONE
 
       dummy = ''
 
-      READ(1,101),dummy
+      READ(1,101)dummy
 
       IF(ADJUSTL(dummy) .NE. 'ELEMENTS/CELLS 2.3.16')THEN
         WRITE(*,*)'ERROR : Geometry Format Problem!'
@@ -1622,7 +1622,7 @@ IMPLICIT NONE
         ENDIF
       ENDDO 
 
-      READ(1,101),dummy
+      READ(1,101)dummy
       IF(dummy .ne. 'ENDOFSECTION')THEN
         WRITE(*,*)'ERROR : Geometry Format Problem!'
         ierror = 1
@@ -2072,15 +2072,16 @@ SUBROUTINE fd_calc_part_collision(Fpq,Fpw)
 !--A naive collision strategy, Only for O(10^3) spherical particles  
 
 USE shared_data,      ONLY : nsphere,objcentx,objcenty,gravx,gravy,x,y,objradius,&
-                            xPeriodic,yPeriodic,LDomainx,LDomainy
-USE real_parameters,  ONLY : zero,two,epsilonP,five,ten,three,real_1e2,real_1e7,six,one
+                             xPeriodic,yPeriodic,LDomainx,LDomainy
+
+USE real_parameters,  ONLY : zero,two,five,ten,three,six,one
 USE precision,        ONLY : r_single
 
 IMPLICIT NONE
 REAL(KIND = r_single),INTENT(INOUT) :: Fpq(2,nsphere),Fpw(2,nsphere)
 INTEGER :: q,p
 LOGICAL,SAVE :: Entered = .FALSE.
-REAL(KIND = r_single),SAVE :: MaxRadius,miny,maxy,minx,maxx,g,factorp,factorw
+REAL(KIND = r_single),SAVE :: MaxRadius,miny,maxy,minx,maxx,g
 
 IF(.NOT.Entered)THEN
   MaxRadius = MAXVAL(objradius(1:nsphere),1)
@@ -2090,20 +2091,16 @@ IF(.NOT.Entered)THEN
   maxy = MAXVAL(y,1)
   g = SQRT(gravx**2+gravy**2)
   Entered = .TRUE.
-  factorp = (two)*ten
-  factorw = real_1e2*real_1e7
 ENDIF
 
 Fpq = zero
 Fpw = zero
 
-
-
 !--Particle-particle collision
 DO p = 1,nsphere
   DO q = 1,nsphere
     IF(p /= q)THEN
-      Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q),p,q,factorp*epsilonP)
+      Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q),p,q)
     ENDIF
   ENDDO
 ENDDO
@@ -2115,14 +2112,14 @@ IF(xPeriodic == 1)THEN
       DO q = 1,nsphere
         IF(objcentx(q) < minx + six * MaxRadius)THEN
           Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)+ &
-                                                        LDomainx,objcenty(q),p,q,factorp*epsilonP)
+                                                        LDomainx,objcenty(q),p,q)
         ENDIF
       ENDDO
     ELSEIF(objcentx(p) < minx + six * MaxRadius)THEN
       DO q = 1,nsphere
         IF(objcentx(q) > maxx - six * MaxRadius)THEN
           Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q)- &
-                                                        LDomainx,objcenty(q),p,q,factorp*epsilonP)
+                                                        LDomainx,objcenty(q),p,q)
         ENDIF
       ENDDO
     ENDIF
@@ -2136,14 +2133,14 @@ IF(yPeriodic == 1)THEN
       DO q = 1,nsphere
         IF(objcenty(q) < miny + six * MaxRadius)THEN
           Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)+ &
-                                                        LDomainy,p,q,factorp*epsilonP)
+                                                        LDomainy,p,q)
         ENDIF
       ENDDO
     ELSEIF(objcenty(p) < miny + six * MaxRadius)THEN
       DO q = 1,nsphere
         IF(objcenty(q) > maxy - six * MaxRadius)THEN
           Fpq(:,p) = Fpq(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(q),objcenty(q)- &
-                                                        LDomainy,p,q,factorp*epsilonP)
+                                                        LDomainy,p,q)
         ENDIF
       ENDDO
     ENDIF
@@ -2155,44 +2152,41 @@ DO p = 1,nsphere
 
   IF(xPeriodic == 0)THEN
     !--e wall
-    Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p,factorw*epsilonP)
+    Fpw(:,p) = fd_calc_binary_colforce(objcentx(p),objcenty(p),maxx+objradius(p),objcenty(p),p,p)
     !--w wall
-    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p,factorw*epsilonP)
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),minx-objradius(p),objcenty(p),p,p)
   ENDIF
   IF(yPeriodic == 0)THEN
     !--n wall
-    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p,factorw*epsilonP)
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),maxy+objradius(p),p,p)
     !--s wall
-    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p,factorw*epsilonP)
+    Fpw(:,p) = Fpw(:,p) + fd_calc_binary_colforce(objcentx(p),objcenty(p),objcentx(p),miny-objradius(p),p,p)
   ENDIF
 
 ENDDO
 
 END SUBROUTINE fd_calc_part_collision
 
-FUNCTION fd_calc_binary_colforce(xp,yp,xq,yq,p,q,epsilonP)
+FUNCTION fd_calc_binary_colforce(xp,yp,xq,yq,p,q)
 
 !--Suggested by Glowinsky 1995, Only forces in normal direction  
 
-USE shared_data,    ONLY : dxmean,densitp,objvol,objradius
+USE shared_data,    ONLY : dxmean,densitp,objvol,objradius,dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut,dem_dt
 USE precision,      ONLY : r_single
 USE real_parameters,ONLY : distfactor,zero,half,one
 
 IMPLICIT NONE 
 
 REAL(KIND = r_single) :: fd_calc_binary_colforce(2)
-REAL(KIND = r_single),INTENT(IN)  :: xp,yp,xq,yq,epsilonP
+REAL(KIND = r_single),INTENT(IN)  :: xp,yp,xq,yq
 INTEGER              ,INTENT(IN)  :: p,q
-REAL(KIND = r_single)             :: pq(2),dpq !-unit vect and distance between two centres
+REAL(KIND = r_single)             :: dpq,delta,npq(2) !-unit vect and distance between two centres
 
-dpq = SQRT( (xp - xq)**2 + (yp - yq)**2 )
-pq =  (/(xp - xq),(yp - yq)/)
-!epq = pq/dpq
+CALL fd_calc_unitvector(xq, yq, xp, yp, npq(1), npq(2), dpq)
 
-!fd_calc_binary_colforce = (densitp(p)*objvol(p) + densitp(q)*objvol(q))/two/(dxmean)**2*&
-!                          (MAX(zero,-(dpq - objradius(p) - objradius(q) - const*dxmean)/(const*dxmean)))**2*epq
+delta = (objradius(p) + objradius(q) + distfactor*dxmean) - dpq
 
-fd_calc_binary_colforce = epsilonP*pq*(MAX(zero,-(dpq - objradius(p) - objradius(q) - distfactor*dxmean)))**2
+fd_calc_binary_colforce = dem_kn*npq*MAX(zero,delta)
 
 END FUNCTION fd_calc_binary_colforce
 

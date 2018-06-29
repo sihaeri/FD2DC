@@ -62,14 +62,4 @@ INTEGER,PARAMETER       :: SOLVER_DONE = 1
 
 INTEGER,PARAMETER       :: OUTER_ITR_DONE = -1
 
-!--LAMMPS
-INTEGER,PARAMETER       :: use_LAMMPS_no = 0
-INTEGER,PARAMETER       :: use_LAMMPS_yes = use_LAMMPS_no + 1
-INTEGER,PARAMETER       :: RANK_ONE = 1
-INTEGER,PARAMETER       :: RANK_THREE = 3
-CHARACTER(LEN = *),DIMENSION(4),PARAMETER :: LMP_COMMANDS=(/'atom_style sphere              ',&
-                                                            'dimension 2                    ',&
-                                                            'newton off                     ',&
-                                                            'comm_modify mode single vel yes'/)
-
 END MODULE parameters

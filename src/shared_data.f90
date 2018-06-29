@@ -300,23 +300,7 @@ type(culaSparseJacobiOptions) :: precondOpts
 ! results
 type(culaSparseResult) :: res
 
-!--LAMMPS VARIABLES
-INTEGER                :: use_lammps
-TYPE(c_ptr)            :: lmp_ptr
-DOUBLE PRECISION, ALLOCATABLE :: lmp_x(:)
-DOUBLE PRECISION, ALLOCATABLE :: lmp_v(:)
-DOUBLE PRECISION, ALLOCATABLE :: lmp_o(:)
-DOUBLE PRECISION, ALLOCATABLE :: lmp_objRadius(:)
-DOUBLE PRECISION, ALLOCATABLE :: lmp_objMass(:)
-INTEGER, ALLOCATABLE          :: lmp_img(:)
-
-CHARACTER(LEN = 80) :: lmp_fname
 !--Spring-Dashpot Constants (assuming hooke model with history effects)
-REAL(KIND = r_single) :: lmp_kn,lmp_kt,lmp_gamman,lmp_gammat,lmp_mut,&
-                         lmp_dt
-INTEGER               :: lmp_flag,lmp_nstep
-CHARACTER(LEN = 256)  :: lmp_command
-REAL(C_double), pointer   :: lmp_dppDummy => NULL()
-INTEGER(C_int)            :: lmp_iDummy
+REAL(KIND = r_single) :: dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut,dem_dt
 
 END MODULE shared_data

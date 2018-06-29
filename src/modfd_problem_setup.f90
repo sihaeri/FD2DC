@@ -22,10 +22,10 @@ CONTAINS
 !============================================
 SUBROUTINE fd_problem_setup
 
-USE real_parameters,        ONLY : zero,one,two,pi,half,quarter,vlarge,vsmall,oneandhalf,fourthird,small
+USE real_parameters,        ONLY : zero,one,two,three,four,pi,half,quarter,vlarge,vsmall,oneandhalf,fourthird,small
 USE parameters,             ONLY : out_unit,set_unit,alloc_create,nphi,grd_unit,max_char_len,solver_sparsekit,solver_sip,&
                                    subTimeStep,solver_cg,solver_hypre,plt_unit,init_field_unit,use_GPU_yes,use_GPU_no,&
-                                   OPSUCCESS,USE_LAMMPS_YES,USE_LAMMPS_NO,LMP_COMMANDS,RANK_ONE,RANK_THREE
+                                   OPSUCCESS
 USE precision,              ONLY : r_single
 USE shared_data,            ONLY : devID,solver_type,NNZ,NCel,lli,itim,time,lread,lwrite,ltest,louts,loute,ltime,&
                                    maxit,imon,jmon,ipr,jpr,sormax,slarge,alfa,minit,initFromFile,&
@@ -42,8 +42,9 @@ USE shared_data,            ONLY : devID,solver_type,NNZ,NCel,lli,itim,time,lrea
                                    mpi_comm,Hypre_A,Hypre_b,Hypre_x,nprocs_mpi,myrank_mpi,& !--viscosity temperature dependance
                                    temp_visc,viscgamma,calclocalnusselt_ave,naverage_steps,&
                                    use_GPU,arow,acol,acoo,acsr,aclc,arwc,ndt,& !--CULA Variables
-				   handle, platformOpts, formatOpts,  precondOpts, solverOpts, config, & !--LAMMPS Variables
-                                   lmp_fname, lmp_kn, lmp_kt, lmp_gamman, lmp_gammat, lmp_mut, use_lammps, lmp_flag
+                                   handle, platformOpts, formatOpts,  precondOpts, solverOpts, config,& !--Shared data
+                                   dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut,dem_dt
+
 
 use cula_sparse_type
 use cula_sparse
@@ -56,7 +57,6 @@ USE modfd_tecwrite,         ONLY : fd_tecwrite_sph_s,fd_tecwrite_sph_v,fd_tecwri
 !USE modcu_BiCGSTAB,         ONLY : cu_getInstance,cu_initDevice,cu_allocDevice,cu_shutdown,cu_coo2csr,cu_cpH2D_coords
 
 USE modfd_solve_linearsys,  ONLY : fd_cooInd_create
-USE modlmp_particle,        ONLY : lmp_setup
 IMPLICIT NONE
 
 REAL(KIND = r_single) :: uin,vin,pin,tin,dx,dy,rp,domain_vol,rdummy,massi,massj,mstar
@@ -72,12 +72,8 @@ naverage_steps = 0
 CALL fd_alloc_solctrl_arrays(alloc_create)
 
 READ(set_unit,6)title
-READ(set_unit,*)xPeriodic,yPeriodic,use_GPU,devID,use_lammps
+READ(set_unit,*)xPeriodic,yPeriodic,use_GPU,devID
 
-IF(use_lammps == USE_LAMMPS_YES)THEN
-  READ(set_unit,*)lmp_fname
-  READ(set_unit,*)lmp_kn,lmp_kt,lmp_gamman,lmp_gammat,lmp_mut,lmp_flag
-ENDIF
 IF(use_GPU /= use_GPU_no .AND. use_GPU /= use_GPU_yes)THEN
   WRITE(*,'(A, I5, A, I5)')'use_gpu should be:', use_GPU_yes,', or:', use_GPU_no
   STOP
@@ -122,19 +118,28 @@ IF(putobj)THEN
   READ(set_unit,*)fd_urf
   READ(set_unit,*)nsphere
   IF(nsphere > 0)THEN
+    READ(set_unit,*)dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut
+
     READ(set_unit,*)sphnprt
     CALL fd_alloc_objprop_arrays(alloc_create)
     DO i = 1,nsphere
       IF(isotherm)THEN
         READ(set_unit,*)objcentx(i),objcenty(i),objradius(i),objbradius(i),densitp(i),objtp(i),betap(i),cpp(i),kappap(i)
+
       ELSE
         READ(set_unit,*)objcentx(i),objcenty(i),objradius(i),objbradius(i),densitp(i),objtp(i),betap(i),cpp(i),kappap(i),&
                         objqp(i)
+
       ENDIF
       READ(set_unit,*)nsurfpoints(i),nnusseltpoints(i),mcellpercv(i)
       objcentxo = objcentx
       objcentyo = objcenty
     ENDDO
+    !--Estimate the collision time for the spring-dashpot model
+    dem_dt = four/three*pi*(SUM(densitp)/nsphere)*(SUM(objradius)/nsphere)**3
+    dem_dt = pi/SQRT(two*dem_kn/dem_dt-(dem_gamman/two)**2)
+    WRITE(out_unit,*) 'DEM dt= ', dt, ' , flow dt= ', dem_dt
+
     IF(.NOT. lread)THEN
       CALL fd_alloc_objgeom_arrays(alloc_create,MAXVAL(nsurfpoints(:),1))
       IF(calclocalnusselt)CALL fd_alloc_nusselt_arrays(alloc_create,MAXVAL(nnusseltpoints(:),1))
@@ -280,13 +285,6 @@ IF(putobj)THEN
   ENDDO
             
   dxmean = domain_vol/REAL(ncell,r_single)
-  !-----LAMMPS Setup
-  !-----Initialize and setup based on the code input
-  IF(use_lammps==USE_LAMMPS_YES)THEN
-    
-    call lmp_setup
-  
-  ENDIF
 ENDIF
 
 !---------------------------------------------------
@@ -299,7 +297,7 @@ CALl fd_alloc_work_arrays(alloc_create)
 !
 IF(.NOT.movingmesh)THEN
   DO j=1,nj
-    t(j)=th
+      t(j)=th
   END DO
 
   DO j=1,nj
