@@ -45,7 +45,7 @@ USE modfd_calc_integrals,ONLY : fd_calc_integrals,fd_calc_surf_force,fd_calc_sur
                                 fd_calc_lwall_nusselt,fd_calc_surf_nusselt_ave,fd_calc_lwall_nusselt_ave
 USE modfd_tecwrite,      ONLY : fd_tecwrite_eul,fd_tecwrite_sph_v,fd_tecwrite_sph_s
 USE modfd_create_geom,   ONLY : fd_calc_sources,fd_calc_mi,fd_calc_ori,fd_calc_pos,fd_calc_physprops,fd_copy_oldvel,&
-                                fd_move_mesh,fd_calculate_stats,fd_calc_part_collision
+                                fd_move_mesh,fd_calculate_stats,fd_calc_part_collision,fd_update_fieldvel
 !USE modcu_BiCGSTAB,      ONLY : cu_shutdown
 use omp_lib
 IMPLICIT NONE
@@ -237,6 +237,7 @@ timeloop: DO itim = itims,itime
       ENDIF
     ENDIF
     CALL fd_calc_physprops(OUTER_ITR_DONE)
+    CALL fd_update_fieldvel
     IF(nsphere > 0 .AND. movingmesh)CALL fd_move_mesh(ismoved)
     IF(stationary)THEN
       CALL fd_calc_sources(force_correct,fd_resor,iter)

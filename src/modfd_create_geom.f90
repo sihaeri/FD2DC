@@ -18,7 +18,7 @@ MODULE modfd_create_geom
 PRIVATE
 PUBLIC :: fd_create_geom,fd_calc_sources,fd_calc_delta,find_single_point,fd_calc_mi,fd_calc_ori,fd_copy_oldvel,fd_calc_pos,&
           fd_calc_physprops,fd_move_mesh,fd_calc_quality,fd_calculate_stats,fd_calc_part_collision,fd_init_temp,&
-          fd_track_single_point, fd_calc_forcedmotion, fd_update_forcedvel, fd_create_interpmol,fd_find_rigidforce_contrib
+          fd_track_single_point, fd_calc_forcedmotion, fd_update_forcedvel, fd_create_interpmol,fd_find_rigidforce_contrib,fd_update_fieldvel
 
 CONTAINS
 !===========================================
@@ -2529,4 +2529,121 @@ LOGICAL                     :: failed
 
 END SUBROUTINE fd_create_interpmol_nus
 
+
+SUBROUTINE fd_update_fieldvel
+
+USE shared_data,    ONLY : objru,objrv,obju,objv,xPeriodic,yPeriodic,&
+                           objpoint_cvx, objpoint_cvy,x,y,objcellx,objcelly,&
+                           xc,yc,objcentu,objcentv,objcentom,objcentx,objcenty,&
+                           dt,li,objcellvol,nobjcells,u,v,densitp,nij,fd_urf,objvol,&
+                           nim,njm,fx,fy,fdsub,fdsvb,nj,objtp,objt,objrt,objq,fdst,t,&
+                           nsphere,fdsvc,objpoint_interpx,objpoint_interpy,&
+                           zobjcenty,zobjcentx,zobjcelly,zobjcellx,LDomainx,LDomainy,rigidforce_contrib,&
+                           objcell_bndFlag,u,v,f1,f2,fx,fy,ft1,ft2,celcp,den,r
+USE precision,      ONLY : r_single
+USE real_parameters,ONLY : zero,one,half
+IMPLICIT NONE
+
+!--locals
+INTEGER               :: i,j,n,nn,ii,jj,nim2,njm2,ij,ije,ijn,xend,yend
+REAL(KIND = r_single) :: dx,dy,del,xp,yp,fxe,fxp,uel,fyn,fyp,vnl,s
+
+nim2 = nim - 1
+njm2 = njm - 1
+
+obju = zero
+objv = zero
+
+DO nn = 1,nsphere
+  DO n = 1,nobjcells(nn)
+    IF(objcell_bndFlag(n,nn) == 0)THEN
+      DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
+        ii = i + xPeriodic*(MAX(2-i,0)*nim2 + MIN(nim-i,0)*nim2)
+        xp = objcellx(n,nn) + xPeriodic*(MAX(2-i,0)*LDomainx + MIN(nim-i,0)*LDomainx)
+        dx = x(ii) - x(ii-1)
+        DO j = objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
+          jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2) 
+          ij = li(ii)+jj 
+          !IF(rigidForce_contrib(ij) == nn)THEN
+            yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
+            dy = y(jj) - y(jj-1)
+            del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx, dy)*dx*dy
+            obju(n,nn) = obju(n,nn) + u(ij)*del
+            objv(n,nn) = objv(n,nn) + v(ij)*del
+          !ENDIF
+        ENDDO
+      ENDDO
+    ENDIF
+  ENDDO
+ENDDO
+
+DO nn = 1,nsphere
+  DO n = 1,nobjcells(nn)
+      objru(n,nn) = objcentu(nn) - objcentom(nn)*(objcelly(n,nn) - objcenty(nn)+(zobjcelly(n,nn) - zobjcenty(nn))*LDomainy)
+      objrv(n,nn) = objcentv(nn) + objcentom(nn)*(objcellx(n,nn) - objcentx(nn)+(zobjcellx(n,nn) - zobjcentx(nn))*LDomainx)
+  ENDDO
+ENDDO
+
+DO nn = 1,nsphere
+  DO n = 1,nobjcells(nn)
+    IF(objcell_bndFlag(n,nn) == 0)THEN
+      DO i = objpoint_interpx(1,n,nn),objpoint_interpx(2,n,nn)
+        ii = i + xPeriodic*(MAX(2-i,0)*nim2 + MIN(nim-i,0)*nim2)
+        xp = objcellx(n,nn) + xPeriodic*(MAX(2-i,0)*LDomainx + MIN(nim-i,0)*LDomainx)
+        dx = x(ii) - x(ii-1)
+        DO j =objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
+          jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2)
+          yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
+          dy = y(jj) - y(jj-1)
+          del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx,dy)*objcellvol(n,nn)
+          ij = li(ii)+jj
+          !IF(rigidForce_contrib(ij) == nn)THEN
+            u(ij) = u(ij) + (objru(n,nn)-obju(n,nn))*del
+            v(ij) = v(ij) + (objrv(n,nn)-objv(n,nn))*del
+          !ENDIF
+        ENDDO
+      ENDDO
+    ENDIF
+  ENDDO
+ENDDO 
+
+xend = nim+xPeriodic-1 !--Apply periodic conditions
+DO i=2,xend
+
+  fxe=fx(i)
+  fxp=one-fxe
+
+  DO j=2,njm
+    ij=li(i)+j
+    ije=ij+nj-i/nim*((i-1)*nj)
+    
+    uel=u(ije)*fxe+u(ij)*fxp
+    
+    s=(y(j)-y(j-1))*(r(j)+r(j-1))*half
+    f1(ij)=(den(ije)*fxe+den(ij)*fxp)*s*uel
+    ft1(ij)=(celcp(ije)*fxe+celcp(ij)*fxp)*s*uel
+    
+  ENDDO
+ENDDO
+
+yend = njm+yPeriodic-1 !--Apply periodic conditions
+DO j=2,yend
+
+  fyn=fy(j)
+  fyp=one-fyn
+
+  DO i=2,nim
+    ij=li(i)+j
+    ijn=ij+1-j/njm*(j-1)
+    
+    vnl=v(ijn)*fyn+v(ij)*fyp
+    
+    s=(x(i)-x(i-1))*r(j)
+    f2(ij)=(den(ijn)*fyn+den(ij)*fyp)*s*vnl
+    ft2(ij)=(celcp(ijn)*fyn+celcp(ij)*fyp)*s*vnl
+
+  ENDDO
+ENDDO
+
+END SUBROUTINE fd_update_fieldvel
 ENDMODULE modfd_create_geom
