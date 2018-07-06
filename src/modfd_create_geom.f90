@@ -694,14 +694,14 @@ DO nn = 1,nsphere
         DO j = objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
           jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2) 
           ij = li(ii)+jj 
-          IF(rigidForce_contrib(ij) == nn)THEN
+          !IF(rigidForce_contrib(ij) == nn)THEN
             yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
             dy = y(jj) - y(jj-1)
             del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx, dy)*dx*dy
             obju(n,nn) = obju(n,nn) + u(ij)*del
             objv(n,nn) = objv(n,nn) + v(ij)*del
             objt(n,nn) = objt(n,nn) + t(ij)*del
-          ENDIF
+          !ENDIF
         ENDDO
       ENDDO
     ENDIF
@@ -749,11 +749,11 @@ DO nn = 1,nsphere
           dy = y(jj) - y(jj-1)
           del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx,dy)*objcellvol(n,nn)
           ij = li(ii)+jj
-          IF(rigidForce_contrib(ij) == nn)THEN
+          !IF(rigidForce_contrib(ij) == nn)THEN
             fdsuc(ij) = fdsuc(ij) + objfx(n,nn)*del*dx*dy
             fdsvc(ij) = fdsvc(ij) + objfy(n,nn)*del*dx*dy
             fdstc(ij) = fdstc(ij) + objq(n,nn)*del*dx*dy
-          ENDIF
+            !ENDIF
         ENDDO
       ENDDO
     ENDIF
@@ -853,7 +853,7 @@ USE parameters,         ONLY : OUTER_ITR_DONE
 USE shared_data,        ONLY : nij,x,y,objpoint_cvx,objpoint_cvy,nsphere,nobjcells,objcellvol,den,deno,denoo,densit,&
                                xc,yc,objcellx,objcelly,li,nim,njm,densitp,objpoint_interpx,objpoint_interpy,&
                                celbeta,beta,betap,celkappa,celcp,celcpo,celcpoo,cpf,cpp,kappaf,kappap,lcal,ien,&
-                               xPeriodic,yPeriodic,LDomainx,LDomainy,rigidForce_contrib,objcell_bndFlag
+                               xPeriodic,yPeriodic,LDomainx,LDomainy,objcell_bndFlag
 USE real_parameters,    ONLY : zero,one
 IMPLICIT NONE
 
@@ -894,12 +894,12 @@ DO nn = 1,nsphere
         DO j =objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
           jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2) 
           ij = li(ii) + jj
-          IF(rigidForce_contrib(ij) == nn)THEN
+          !IF(rigidForce_contrib(ij) == nn)THEN
             yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
             dy = y(jj) - y(jj-1)
             del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx, dy)*objcellvol(n,nn)
             volp(ij) = volp(ij) + del
-          ENDIF
+            !ENDIF
         ENDDO
       ENDDO
     ENDIF
@@ -938,7 +938,7 @@ SUBROUTINE fd_init_temp(tin)
 USE precision,          ONLY : r_single
 USE shared_data,        ONLY : nij,x,y,objpoint_cvx,objpoint_cvy,nsphere,nobjcells,objcellvol,objtp,&
                                xc,yc,objcellx,objcelly,li,nim,njm,objpoint_interpx,objpoint_interpy,&
-                               xPeriodic,yPeriodic,LDomainx,LDomainy,t,rigidForce_contrib
+                               xPeriodic,yPeriodic,LDomainx,LDomainy,t
 USE real_parameters,    ONLY : zero,one
 IMPLICIT NONE
 
@@ -959,12 +959,12 @@ DO nn = 1,nsphere
         DO j =objpoint_interpy(1,n,nn),objpoint_interpy(2,n,nn)
           jj = j + yPeriodic*(MAX(2-j,0)*njm2 + MIN(njm-j,0)*njm2)
           ij = li(ii) + jj
-          IF(rigidForce_contrib(ij) == nn)THEN
+          !IF(rigidForce_contrib(ij) == nn)THEN
             yp = objcelly(n,nn) + yPeriodic*(MAX(2-j,0)*LDomainy + MIN(njm-j,0)*LDomainy)
             dy = y(jj) - y(jj-1)
             del = fd_calc_delta(xc(ii),yc(jj),xp,yp,dx, dy)*objcellvol(n,nn)
             volp(ij) = volp(ij) + del
-          ENDIF
+            !ENDIF
         ENDDO
       ENDDO
   ENDDO
@@ -1181,7 +1181,7 @@ END SUBROUTINE fd_move_mesh
 
 SUBROUTINE fd_calc_pos(itr,titr)
 
-USE parameters,       ONLY : subTimeStep,OUTER_ITR_DONE
+USE parameters,       ONLY : OUTER_ITR_DONE
 USE precision,        ONLY : r_single
 USE shared_data,      ONLY : nsphere,nobjcells,objcentmi,objcentxo,objcentyo,objcellx,objcelly,&
                              objcentxo,objcentyo,dt,objcentu,objcentv,objcento,objpoint_interpx,objpoint_interpy,&
@@ -1189,7 +1189,7 @@ USE shared_data,      ONLY : nsphere,nobjcells,objcentmi,objcentxo,objcentyo,obj
                              objpoint_cvx,objpoint_cvy,nsurfpoints,surfpointx,surfpointy,dxmeanmoved,up,vp,omp,&
                              forcedmotion,lread,Fpq,Fpw,objvol,densitp,x,y,xc,yc,objcellvol,li,fdfcu,fdfcv,&
                              zobjcentx,zobjcentxo,zobjcenty,zobjcentyo,zobjcellx,zobjcelly,LDomainx,LDomainy,&
-                             zobjcellvertx,zobjcellverty,nim,njm,zsurfpointx,zsurfpointy,objcell_bndFlag
+                             zobjcellvertx,zobjcellverty,nim,njm,zsurfpointx,zsurfpointy,objcell_bndFlag,subTimeStep
 USE real_parameters,  ONLY : zero,three,two,half,one,four
 
 IMPLICIT NONE

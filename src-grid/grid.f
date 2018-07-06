@@ -380,8 +380,8 @@ C
         END DO
         YALL(NJGR(L))=YALL(NJGR(L)-1)
 C
-        WRITE(3,*) (XALL(I),I=1,NIGR(L))
-        WRITE(3,*) (YALL(J),J=1,NJGR(L))
+        WRITE(3,'(ES30.16)') (XALL(I),I=1,NIGR(L))
+        WRITE(3,'(ES30.16)') (YALL(J),J=1,NJGR(L))
         IF(LPLOT.EQ.1) CALL GRIDPL(L)
       END DO
 C

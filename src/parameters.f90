@@ -50,8 +50,6 @@ INTEGER,PARAMETER       :: maxmove = 10
 INTEGER,PARAMETER       :: do_collect_stat = 1
 INTEGER,PARAMETER       :: end_collect_stat = do_collect_stat + 1
 
-INTEGER,PARAMETER       :: subTimeStep = 20
-
 INTEGER,PARAMETER       :: use_GPU_no  = 0
 INTEGER,PARAMETER       :: use_GPU_yes = use_GPU_no + 1
 INTEGER,PARAMETER       :: OPERROR = -1

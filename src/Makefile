@@ -3,12 +3,12 @@
 #CC=/tmp/shaeri/intel/Compiler/11.0/081/bin/intel64/icc
 CULASPARSE_INC_PATH=/home/wkb16123/installed/culasparse/include/
 CULASPARSE_LIB_PATH_64=/home/wkb16123/installed/culasparse/lib64
-F90=mpif90
-CXX=mpic++
+F90=ifort
+#CXX=mpic++
 COMPILER_OPTS=-O3
 COMP_OPTS_EXT=-I${CULASPARSE_INC_PATH}
-LIBSPATH=-L${CULASPARSE_LIB_PATH_64} -L.
-LIBS=-lcula_sparse -lcolamd -liomp5 #-lcublas -lcusparse
+LIBSPATH=-L${CULASPARSE_LIB_PATH_64}
+LIBS=-lcula_sparse -lcolamd -liomp5  #-lcublas -lcusparse
 MODULES=${CULASPARSE_INC_PATH}/cula_sparse_legacy.f90
 # -------------------End-macro-Defs---------------------------
 

@@ -302,5 +302,6 @@ type(culaSparseResult) :: res
 
 !--Spring-Dashpot Constants (assuming hooke model with history effects)
 REAL(KIND = r_single) :: dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut,dem_dt
+INTEGER       :: subTimeStep
 
 END MODULE shared_data

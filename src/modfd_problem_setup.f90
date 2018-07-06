@@ -24,7 +24,7 @@ SUBROUTINE fd_problem_setup
 
 USE real_parameters,        ONLY : zero,one,two,three,four,pi,half,quarter,vlarge,vsmall,oneandhalf,fourthird,small
 USE parameters,             ONLY : out_unit,set_unit,alloc_create,nphi,grd_unit,max_char_len,solver_sparsekit,solver_sip,&
-                                   subTimeStep,solver_cg,solver_hypre,plt_unit,init_field_unit,use_GPU_yes,use_GPU_no,&
+                                   solver_cg,solver_hypre,plt_unit,init_field_unit,use_GPU_yes,use_GPU_no,&
                                    OPSUCCESS
 USE precision,              ONLY : r_single
 USE shared_data,            ONLY : devID,solver_type,NNZ,NCel,lli,itim,time,lread,lwrite,ltest,louts,loute,ltime,&
@@ -43,7 +43,7 @@ USE shared_data,            ONLY : devID,solver_type,NNZ,NCel,lli,itim,time,lrea
                                    temp_visc,viscgamma,calclocalnusselt_ave,naverage_steps,&
                                    use_GPU,arow,acol,acoo,acsr,aclc,arwc,ndt,& !--CULA Variables
                                    handle, platformOpts, formatOpts,  precondOpts, solverOpts, config,& !--Shared data
-                                   dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut,dem_dt
+                                   dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut,dem_dt,subTimeStep
 
 
 use cula_sparse_type
@@ -138,8 +138,8 @@ IF(putobj)THEN
     !--Estimate the collision time for the spring-dashpot model
     dem_dt = four/three*pi*(SUM(densitp)/nsphere)*(SUM(objradius)/nsphere)**3
     dem_dt = pi/SQRT(two*dem_kn/dem_dt-(dem_gamman/two)**2)
-    WRITE(out_unit,*) 'DEM dt= ', dt, ' , flow dt= ', dem_dt
-
+    subTimeStep = MAX(1,FLOOR(dt/dem_dt))
+    WRITE(*,*) 'DEM dt= ', dem_dt, ' , flow dt= ', dt, ', sub-steps= ',subTimeStep
     IF(.NOT. lread)THEN
       CALL fd_alloc_objgeom_arrays(alloc_create,MAXVAL(nsurfpoints(:),1))
       IF(calclocalnusselt)CALL fd_alloc_nusselt_arrays(alloc_create,MAXVAL(nnusseltpoints(:),1))
@@ -382,7 +382,7 @@ ENDIF
 
 IF(putobj)THEN
   IF(nsphere > 0)THEN
-    !--Mark effected cells
+    !--Mark affected cells
     CALL fd_find_rigidforce_contrib
     CALL fd_calc_physprops(1)
     CALL fd_init_temp(tin)
