@@ -436,7 +436,7 @@ IF(solver_type == solver_sparsekit)THEN
     
     config%relativeTolerance = sor(iu)
     config%maxIterations = nsw(iu)
-    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
+    culaStat = culaSparseCudaDcooBicgstabIlu0(handle, config, platformOpts, formatOpts, &
                                 solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
   
     resor(iu) = res%residual%relative
@@ -531,7 +531,7 @@ IF(solver_type == solver_sparsekit)THEN
 
     config%relativeTolerance = sor(iv)
     config%maxIterations = nsw(iv)
-    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
+    culaStat = culaSparseCudaDcooBicgstabIlu0(handle, config, platformOpts, formatOpts, &
                                 solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
    
     resor(iv) = res%residual%relative

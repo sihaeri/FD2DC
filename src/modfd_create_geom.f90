@@ -38,7 +38,7 @@ USE shared_data,        ONLY : objcentx,objcenty,objradius,objbradius,nsurfpoint
                                zobjcellvertx,zobjcellverty,xPeriodic,yPeriodic,LDomainx,LDomainy,&
                                objcellvertx,objcellverty,objpoint_interpx,objpoint_interpy,&
                                problem_name,problem_len,read_fd_geom,dxmean,hypre_A,Hypre_b,Hypre_x,mpi_comm ,nij,&
-                               dxmeanmovedtot,objcentxinit,objcentyinit,objcellxinit,dxmeanmoved,&
+                               dxmeanmovedtot,objcentxinit,objcentyinit,objcellxinit,dxmeanmoved,dxmin,&
                                objcellyinit,objcellvertxinit,objcellvertyinit,forcedmotion,objcell_bndflag
 USE precision,          ONLY : r_single
 USE parameters,         ONLY : plt_unit
@@ -59,18 +59,21 @@ dxmeanmoved = zero
 dxmeanmovedtot = zero
 domain_vol = zero
 ncell = 0
+dxmin = large 
 DO i=2,nim
   dx=x(i)-x(i-1)
+  dxmin = MIN(dx,dxmin)
   DO j=2,njm
     ncell = ncell + 1
     dy=y(j)-y(j-1)
+    dxmin = min(dy,dxmin)
     rp=half*(r(j)+r(j-1))
     domain_vol = domain_vol + (dx*dy*rp)**half
   ENDDO
 ENDDO
             
 dxmean = domain_vol/REAL(ncell)
-
+WRITE(*,*) "dxmean = ",dxmean," ,dxmin = ", dxmin
 DO n = 1,nsphere
   nn(n) = CEILING(two*objradius(n) / (dxmean/REAL(mcellpercv(n),r_single)))
   nnb(n) = CEILING(two*objbradius(n) / (dxmean/REAL(mcellpercv(n),r_single)))
@@ -2171,7 +2174,7 @@ FUNCTION fd_calc_binary_colforce(xp,yp,xq,yq,p,q)
 
 !--Suggested by Glowinsky 1995, Only forces in normal direction  
 
-USE shared_data,    ONLY : dxmean,densitp,objvol,objradius,dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut,dem_dt
+USE shared_data,    ONLY : dxmin,densitp,objvol,objradius,dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut,dem_dt
 USE precision,      ONLY : r_single
 USE real_parameters,ONLY : distfactor,zero,half,one
 
@@ -2180,13 +2183,15 @@ IMPLICIT NONE
 REAL(KIND = r_single) :: fd_calc_binary_colforce(2)
 REAL(KIND = r_single),INTENT(IN)  :: xp,yp,xq,yq
 INTEGER              ,INTENT(IN)  :: p,q
-REAL(KIND = r_single)             :: dpq,delta,npq(2) !-unit vect and distance between two centres
+REAL(KIND = r_single)             :: dummy,dpq,delta,npq(2) !-unit vect and distance between two centres
 
 CALL fd_calc_unitvector(xq, yq, xp, yp, npq(1), npq(2), dpq)
 
-delta = (objradius(p) + objradius(q) + distfactor*dxmean) - dpq
+delta = (objradius(p) + objradius(q) + distfactor*dxmin) - dpq
 
-fd_calc_binary_colforce = dem_kn*npq*MAX(zero,delta)
+dummy = MAX(zero, delta)
+ 
+fd_calc_binary_colforce = dem_kn*npq*dummy
 
 END FUNCTION fd_calc_binary_colforce
 

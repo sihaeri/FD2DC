@@ -183,6 +183,8 @@ LOGICAL                       :: duct !--if true inlet outlet boundary
 !--stationary:  set to TRUE for forced motion or stationary objects
 !--forcedmotion:  set to TRUE if it is forced motion and change the forced_motion function for the type of motion
 !--dxmean:      mean dx of the domain calculated in fd_create_geom
+!--dxmin:       min dx of the domain calculated in fd_create_geom (used for
+!collision detection)
 !--dxmeanmoved: mean motion of the particles in x-dir since the last mesh motion
 !--cpp:  mean heat capacity particle, kappap: particle conductivity 
 !--movingmesh:  does not work properly, for simulation of infinitly large duct
@@ -197,7 +199,7 @@ INTEGER                       :: nsphere,sphnprt,naverage_steps,naverage_wsteps
 LOGICAL                       :: putobj,calcsurfforce,calclocalnusselt,read_fd_geom,stationary,movingmesh,&
                                  forcedmotion,isotherm,calclocalnusselt_ave,calcwalnusselt,calcwalnusselt_ave
 REAL(KIND = r_single)         :: fd_urf
-REAL(KIND = r_single)         :: dxmean,dxmeanmoved,dxmeanmovedtot
+REAL(KIND = r_single)         :: dxmean,dxmeanmoved,dxmeanmovedtot,dxmin
 
 !--Current particle velocity for the forced motion case
 REAL(KIND = r_single),ALLOCATABLE,DIMENSION(:)     :: up,vp,omp,objcentxinit,objcentyinit
@@ -296,7 +298,7 @@ type(culaSparseConfig) :: config
 type(culaSparseCudaOptions) :: platformOpts
 type(culaSparseCooOptions) :: formatOpts
 type(culaSparseBicgstabOptions) :: solverOpts
-type(culaSparseJacobiOptions) :: precondOpts
+type(culaSparseIlu0Options) :: precondOpts
 ! results
 type(culaSparseResult) :: res
 
