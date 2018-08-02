@@ -288,7 +288,7 @@ IF(solver_type == solver_sparsekit)THEN
     
     config%relativeTolerance = sor(ien)
     config%maxIterations = nsw(ien)
-    culaStat = culaSparseCudaDcooBicgstabIlu0(handle, config, platformOpts, formatOpts, &
+    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
                                 solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
   
     resor(ien) = res%residual%relative

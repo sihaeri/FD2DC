@@ -209,7 +209,7 @@ IF(solver_type == solver_sparsekit .OR. solver_type == solver_hypre)THEN
      platformOpts%useHybridFormat=1
     IF(culaSparseCooOptionsInit(handle, formatOpts) /= culaSparseNoError)GOTO 100
     formatOpts%indexing = 1
-    IF(culaSparseIlu0OptionsInit(handle, precondOpts) /= culaSparseNoError)GOTO 100
+    IF(culaSparseJacobiOptionsInit(handle, precondOpts) /= culaSparseNoError)GOTO 100
     !IF(culaSparseEmptyOptionsInit(handle, precondOpts) /= culaSparseNoError)GOTO 100
     IF(culaSparseConfigInit(handle, config) /= culaSparseNoError)GOTO 100
     IF(culaSparseBicgstabOptionsInit(handle, solverOpts) /= culaSparseNoError)GOTO 100

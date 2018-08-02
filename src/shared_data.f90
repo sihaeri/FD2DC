@@ -298,7 +298,7 @@ type(culaSparseConfig) :: config
 type(culaSparseCudaOptions) :: platformOpts
 type(culaSparseCooOptions) :: formatOpts
 type(culaSparseBicgstabOptions) :: solverOpts
-type(culaSparseIlu0Options) :: precondOpts
+type(culaSparseJacobiOptions) :: precondOpts
 ! results
 type(culaSparseResult) :: res
 

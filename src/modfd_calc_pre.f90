@@ -179,7 +179,7 @@ IF(solver_type == solver_sparsekit)THEN
 
     config%relativeTolerance = sor(ip)
     config%maxIterations = nsw(ip)
-    culaStat = culaSparseCudaDcooBicgstabIlu0(handle, config, platformOpts, formatOpts, &
+    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
                                 solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)   
 
 !    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
