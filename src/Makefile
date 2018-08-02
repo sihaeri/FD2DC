@@ -1,8 +1,6 @@
 # ------------------Macro-Defs---------------------
-#F90=/tmp/shaeri/intel/Compiler/11.0/081/bin/intel64/ifort
-#CC=/tmp/shaeri/intel/Compiler/11.0/081/bin/intel64/icc
-CULASPARSE_INC_PATH=/home/wkb16123/installed/culasparse/include/
-CULASPARSE_LIB_PATH_64=/home/wkb16123/installed/culasparse/lib64
+CULASPARSE_INC_PATH=~/installed/culasparse/include/
+CULASPARSE_LIB_PATH_64=~/installed/culasparse/lib64
 F90=ifort
 #CXX=mpic++
 COMPILER_OPTS=-O3 -traceback -xHost
