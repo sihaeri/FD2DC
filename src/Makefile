@@ -1,6 +1,6 @@
 # ------------------Macro-Defs---------------------
-CULASPARSE_INC_PATH=~/installed/culasparse/include/
-CULASPARSE_LIB_PATH_64=/home/wkb16123/installed/culasparse/lib64
+CULASPARSE_INC_PATH=/opt/culasparse/include/
+CULASPARSE_LIB_PATH_64=/opt/culasparse/lib64
 F90=ifort
 #CXX=mpic++
 COMPILER_OPTS=-O3 -traceback -xHost
