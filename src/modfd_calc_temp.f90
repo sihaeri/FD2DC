@@ -32,7 +32,7 @@ USE shared_data,        ONLY : urf,ien,t,to,too,su,nim,njm,&
                                denoo,deno,den,laxis,sor,resor,ct1,ct2,ct3,&
                                nsw,ft1,ft2,dpx,dpy,ltime,ap,ltest,celkappa,celcp,celcpo,celcpoo,gds,&
                                putobj,fdst,dtx,dty,apt,xperiodic,yperiodic,&
-                               Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,res,&
+                               Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
                                Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,dux,dvy,p,use_GPU
 !handle, config, platformOpts, formatOpts, solverOpts, precondOpts, res, culaStat
@@ -49,7 +49,8 @@ REAL(KIND = r_single) :: urfi,fxe,fxp,dxpe,s,d,fyn,fyp,dypn,cn,&
                          ce,cp,dx,dy,rp,fuds,fcds,vol,aptt,aptto,apttoo,te,tw,ts,tn,&
                          phic,phid,phict,phif,phifcd,fg,dphi,ddphi
 INTEGER               :: ij,i,j,ije,ijn,ijs,ijw,ipar(16),debug,error,xend,yend,ic,ii,jj
-REAL                  :: fpar(16), absTol=0.D0
+REAL                  :: fpar(16)
+DOUBLE PRECISION      :: absTol=0.D0
 
 debug = 0
 
@@ -288,13 +289,13 @@ IF(solver_type == solver_sparsekit)THEN
 !    config%relativeTolerance = sor(ien)
 !    config%maxIterations = nsw(ien)
 !    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
-                                solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
+!                                solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
 
 !    resor(ien) = res%residual%relative
      CALL cusp_biCGSTAB_copyH2D_system(Acoo, SOL, RHS, error)
      IF(error /= OPSUCCESS)GOTO 100
 
-     CALL cusp_BiCGSTAB_solveDev_system(sor(ien),nsw(ien),absTol,error)
+     CALL cusp_BiCGSTAB_solveDev_system(sor(ien),absTol,nsw(ien),error)
      IF(error /= OPSUCCESS)GOTO 100
 
      CALL cusp_BiCGSTAB_getMonitor(resor(ien),ipar(1),error)

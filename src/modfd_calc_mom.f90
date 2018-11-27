@@ -36,7 +36,7 @@ USE shared_data,        ONLY : urf,iu,iv,p,su,sv,apu,apv,nim,njm,&
                                vo,uo,voo,uoo,sor,resor,nsw,f1,f2,&
                                dpx,dpy,t,tref,ltime,ap,fdsu,fdsv,putobj,&
                                dvx,dvy,dux,duy,densit,temp_visc,lamvisc,&
-                               Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,res, &
+                               Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc, &
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
                                Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celbeta,&
                                fdfcu,fdfcv,use_GPU,xPeriodic,yPeriodic
@@ -59,7 +59,8 @@ REAL(KIND = r_single) :: urfu,urfv,fxe,fxp,dxpe,s,d,cp,ce,&
                          vele,velw,veln,vels,due,dve,dun,dvn,visi,&
                          duv(2),dduv(2),uvct,uc,ud,vc,vd,ufcd,vfcd,uf,vf,fg,graduv,gradcf
 INTEGER               :: ij,i,j,ije,ijn,ijs,ijw,ipar(16),debug,error,xend,yend,ic,ii,jj
-REAL                  :: fpar(16), absTol=0.D0
+REAL                  :: fpar(16)
+DOUBLE PRECISION      :: absTol=0.D0
 
 debug = 0
 
@@ -436,19 +437,20 @@ IF(solver_type == solver_sparsekit)THEN
 !    config%relativeTolerance = sor(iu)
 !    config%maxIterations = nsw(iu)
 !    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
-                                solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
+!                                solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
 
 !    resor(iu) = res%residual%relative
      CALL cusp_biCGSTAB_copyH2D_system(Acoo, SOL, RHS, error)
      IF(error /= OPSUCCESS)GOTO 100
 
-     CALL cusp_BiCGSTAB_solveDev_system(sor(iu),nsw(iu),absTol,error)
+     CALL cusp_BiCGSTAB_solveDev_system(sor(iu),absTol,nsw(iu),error)
      IF(error /= OPSUCCESS)GOTO 100
 
      CALL cusp_BiCGSTAB_getMonitor(resor(iu),ipar(1),error)
      IF(error /= OPSUCCESS)GOTO 100
 
      CALL cusp_biCGSTAB_copyD2H_x(sol,error)
+     IF(error /= OPSUCCESS)GOTO 100
 
 !    IF(culaStat /= culaSparseNoError)THEN
 !      WRITE(*,*)'CULA encoutered an error.'
@@ -457,7 +459,8 @@ IF(solver_type == solver_sparsekit)THEN
 !    ENDIF
 
     CALL copy_solution(u,sol)
-
+    
+    100 CONTINUE
     IF(error /= OPSUCCESS)THEN
       WRITE(*,*)'GPU-- x-Momentum solver problem in CUDA operations.'
       STOP
@@ -525,13 +528,13 @@ IF(solver_type == solver_sparsekit)THEN
 !    config%relativeTolerance = sor(iv)
 !    config%maxIterations = nsw(iv)
 !    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
-                                solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
+!                                solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
 
 !    resor(iv) = res%residual%relative
      CALL cusp_biCGSTAB_copyH2D_system(Acoo, SOL, RHS, error)
      IF(error /= OPSUCCESS)GOTO 200
 
-     CALL cusp_BiCGSTAB_solveDev_system(sor(iv),nsw(iv),absTol,error)
+     CALL cusp_BiCGSTAB_solveDev_system(sor(iv),absTol,nsw(iv),error)
      IF(error /= OPSUCCESS)GOTO 200
 
      CALL cusp_BiCGSTAB_getMonitor(resor(iv),ipar(1),error)

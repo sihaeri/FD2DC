@@ -15,8 +15,8 @@
 
 MODULE shared_data
 
-use cula_sparse_type
-use cula_sparse
+!use cula_sparse_type
+!use cula_sparse
 use, intrinsic :: iso_c_binding
 
 USE parameters,     ONLY : nphi, max_char_len
@@ -291,16 +291,16 @@ INTEGER                        :: ndt !ndt is the numebr of time steps to get to
 
 !--GPU Variables for CULA
 ! library handle
-type(culaSparseHandle) :: handle
-integer                :: culaStat
+!type(culaSparseHandle) :: handle
+!integer                :: culaStat
 ! configuration options
-type(culaSparseConfig) :: config
-type(culaSparseCudaOptions) :: platformOpts
-type(culaSparseCooOptions) :: formatOpts
-type(culaSparseBicgstabOptions) :: solverOpts
-type(culaSparseJacobiOptions) :: precondOpts
+!type(culaSparseConfig) :: config
+!type(culaSparseCudaOptions) :: platformOpts
+!type(culaSparseCooOptions) :: formatOpts
+!type(culaSparseBicgstabOptions) :: solverOpts
+!type(culaSparseJacobiOptions) :: precondOpts
 ! results
-type(culaSparseResult) :: res
+!type(culaSparseResult) :: res
 
 !--Spring-Dashpot Constants (assuming hooke model with history effects)
 REAL(KIND = r_single) :: dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut,dem_dt

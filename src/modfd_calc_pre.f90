@@ -33,10 +33,10 @@ USE shared_data,        ONLY : urf,ip,p,su,apu,apv,nim,njm,&
                                sor,resor,nsw,f1,f2,ft1,ft2,celcp,dpx,dpy,&
                                ltime,ap,ipr,jpr,ltest,pp,fdsu,fdsv,&
                                dux,duy,dvx,dvy,fdsuc,fdsvc,fdsub,fdsvb,putobj,&
-                               Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,res, &
+                               Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc, &
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,ct1,ct2,ct3,&
                                Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celcp,use_GPU
-!handle, config, platformOpts, formatOpts, solverOpts, precondOpts, culaStat
+!handle, config, platformOpts, formatOpts, solverOpts, precondOpts, culaStat,res
 
 !use cula_sparse_type
 !use cula_sparse
@@ -53,7 +53,8 @@ REAL(KIND = r_single) :: fxe,fxp,dxpe,s,d,fyn,fyp,dypn,&
                          !duxel,duxe,dvynl,dvyn,fdsuce,fdsvcn,dfyn,dfxe,c,K
 
 INTEGER               :: ij,i,j,ije,ijn,ijw,ijs,ijpref,ipar(16),debug,error,xend,yend
-REAL                  :: fpar(16), absTol=0.D0
+REAL                  :: fpar(16)
+DOUBLE PRECISION      :: absTol=0.D0
 
 debug = 0
 !--EAST CV FACES (S - AREA, VOLE - VOLUME BETWEEN P AND E)
@@ -185,7 +186,7 @@ IF(solver_type == solver_sparsekit)THEN
     CALL cusp_biCGSTAB_copyH2D_system(Acoo, SOL, RHS, error)
     IF(error /= OPSUCCESS)GOTO 100
 
-    CALL cusp_BiCGSTAB_solveDev_system(sor(ip),nsw(ip),absTol,error)
+    CALL cusp_BiCGSTAB_solveDev_system(sor(ip),absTol,nsw(ip),error)
     IF(error /= OPSUCCESS)GOTO 100
 
     CALL cusp_BiCGSTAB_getMonitor(resor(ip),ipar(1),error)

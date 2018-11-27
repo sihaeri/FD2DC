@@ -198,7 +198,8 @@ IF(solver_type == solver_sparsekit .OR. solver_type == solver_hypre)THEN
 
     CALL cusp_biCGSTAB_allocDevice(NCel,NNZ,error)
     IF(error /= OPSUCCESS)GOTO 100
-
+    Arow = Arow - 1
+    Acol = Acol - 1
     CALL cusp_biCGSTAB_copyH2D_AInds(Arow,Acol,error)
     IF(error /= OPSUCCESS)GOTO 100
 
