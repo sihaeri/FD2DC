@@ -23,7 +23,7 @@ SUBROUTINE fd_calc_mom
 
 !--This routine sets the coefficient matrix for the U and
 !--V equations, and calls the linear equation solver to
-!--update the velocity components. Constant fluid 
+!--update the velocity components. Constant fluid
 !--properties are assumed (parts of diffusive fluxes
 !--cancel out)
 USE parameters,         ONLY : out_unit,solver_sparsekit,solver_sip,solver_cg,solver_hypre,use_GPU_yes,OPSUCCESS,SOLVER_DONE,&
@@ -36,20 +36,21 @@ USE shared_data,        ONLY : urf,iu,iv,p,su,sv,apu,apv,nim,njm,&
                                vo,uo,voo,uoo,sor,resor,nsw,f1,f2,&
                                dpx,dpy,t,tref,ltime,ap,fdsu,fdsv,putobj,&
                                dvx,dvy,dux,duy,densit,temp_visc,lamvisc,&
-                               Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
+                               Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,res, &
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,&
                                Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celbeta,&
-                               fdfcu,fdfcv,use_GPU,xPeriodic,yPeriodic,&
-                               handle, config, platformOpts, formatOpts, solverOpts, precondOpts, res, culaStat
+                               fdfcu,fdfcv,use_GPU,xPeriodic,yPeriodic
+!handle, config, platformOpts, formatOpts, solverOpts, precondOpts, res, culaStat
 
-use cula_sparse_type
-use cula_sparse
+!use cula_sparse_type
+!use cula_sparse
 
 USE modfd_set_bc,       ONLY : fd_bcpressure,fd_bcuv,fd_calc_bcuv_grad
 USE precision,          ONLY : r_single
-USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual,fd_cooVal_create
-!USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGSTAB_itr,&
-!                                  cu_cpD2H_solDP
+USE modfd_solve_linearsys,     ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual,fd_cooVal_create
+USE modcusp_library_intrf,     ONLY : cusp_biCGSTAB_copyH2D_system,cusp_BiCGSTAB_solveDev_system , &
+     cusp_biCGSTAB_getMonitor, cusp_biCGSTAB_copyD2H_x
+
 IMPLICIT NONE
 
 REAL(KIND = r_single) :: urfu,urfv,fxe,fxp,dxpe,s,d,cp,ce,&
@@ -58,7 +59,7 @@ REAL(KIND = r_single) :: urfu,urfv,fxe,fxp,dxpe,s,d,cp,ce,&
                          vele,velw,veln,vels,due,dve,dun,dvn,visi,&
                          duv(2),dduv(2),uvct,uc,ud,vc,vd,ufcd,vfcd,uf,vf,fg,graduv,gradcf
 INTEGER               :: ij,i,j,ije,ijn,ijs,ijw,ipar(16),debug,error,xend,yend,ic,ii,jj
-REAL                  :: fpar(16)
+REAL                  :: fpar(16), absTol=0.D0
 
 debug = 0
 
@@ -77,15 +78,15 @@ sv=zero
 apu=zero
 apv=zero
 
-!--FLUXES THROUGH INTERNAL EAST CV FACES 
+!--FLUXES THROUGH INTERNAL EAST CV FACES
 
 !--F1(IJ) is the mass flux through the east face (outward
 !--normal directed to E); FX(I) is the ratio of distance
-!--from P to cell face, to distance from P to E; IJ 
+!--from P to cell face, to distance from P to E; IJ
 !--denotes node P and IJE node E.
 !--Contribution of convective and diffusive fluxes from
 !--east face to AE(P), AW(E), and source terms at both
-!--P and E are calculated; contributions to AP(P) and 
+!--P and E are calculated; contributions to AP(P) and
 !--AP(E) come through the sum of neighbor coefficients
 !--and are not explicitly calculated.
 xend = nim+xPeriodic-1 !--Apply periodic conditions
@@ -103,7 +104,7 @@ DO i=2,xend
     !--CELL FACE AREA S = DY*RE*1
 
     s=(y(j)-y(j-1))*(r(j)+r(j-1))*half
-    
+
     !--COEFFICIENT RESULTING FROM DIFFUSIVE FLUX (SAME FOR U AND V)
     visi = lamvisc(ije)*fxe+lamvisc(ij)*fxp
     d=visi*s/dxpe
@@ -116,47 +117,47 @@ DO i=2,xend
     fvuds=cp*v(ij)+ce*v(ije)
 
     IF( f1(ij) >= zero )THEN
-      
+
       ic    = ij
       ii    = i
       uc    = u(ij)
       vc    = v(ij)
-      
+
       ud    = u(ije)
       vd    = v(ije)
 
-      duv(1) = ud-uc 
-      duv(2) = vd-vc 
-     
-      graduv = DOT_PRODUCT(duv,duv) 
+      duv(1) = ud-uc
+      duv(2) = vd-vc
 
-      dduv(1) = two * dux(ic) * dxpe 
-      dduv(2) = two * dvx(ic) * dxpe 
+      graduv = DOT_PRODUCT(duv,duv)
+
+      dduv(1) = two * dux(ic) * dxpe
+      dduv(2) = two * dvx(ic) * dxpe
 
       gradCf   = DOT_PRODUCT(duv,dduv)
-     
+
       uvct    = one - graduv/(gradCf+small)
 
     ELSE
-      
+
       ic    = ije
       ii    = i+1
       uc    = u(ije)
       vc    = v(ije)
-      
+
       ud    = u(ij)
       vd    = v(ij)
 
       duv(1) = ud-uc
       duv(2) = vd-vc
-     
+
       graduv = DOT_PRODUCT(duv,duv)
-     
-      dduv(1) = -two * dux(ic) * dxpe 
-      dduv(2) = -two * dvx(ic) * dxpe 
+
+      dduv(1) = -two * dux(ic) * dxpe
+      dduv(2) = -two * dvx(ic) * dxpe
 
       gradCf   = DOT_PRODUCT(duv,dduv)
-     
+
       uvCt    = one - graduv/(gradCf+small)
 
     ENDIF
@@ -165,26 +166,26 @@ DO i=2,xend
     vfcd = v(ije)*fxe+v(ij)*fxp
     !--Gamma
     IF( uvct <= zero .OR. uvct >= one )THEN        ! 0.1 <= Beta_m <= 0.5 upwind
-      uf = uc
-      vf = vc
-    ELSEIF( betam <= uvct .AND. uvct < one  )THEN  ! Central  
-      uf = ufcd                                 
-      vf = vfcd                                            
-    ELSEIF(  zero < uvct .AND. uvct < betam )THEN  ! Gamma 
-      fg = uvct / betam                           
-      uf = fg*ufcd + (one-fg)*uc                 
-      vf = fg*vfcd + (one-fg)*vc                           
+       uf = uc
+       vf = vc
+    ELSEIF( betam <= uvct .AND. uvct < one  )THEN  ! Central
+       uf = ufcd
+       vf = vfcd
+    ELSEIF(  zero < uvct .AND. uvct < betam )THEN  ! Gamma
+       fg = uvct / betam
+       uf = fg*ufcd + (one-fg)*uc
+       vf = fg*vfcd + (one-fg)*vc
     ENDIF
     !--Minmod
 !    IF( uvct <= zero .OR. uvct >= one )THEN        ! 0.1 <= Beta_m <= 0.5 upwind
 !      uf = uc
 !      vf = vc
-!    ELSEIF(  uvct < half )THEN  ! Second order Upwind 
-!      uf = uc + dux(ic)*(x(i) - xc(ii))                
-!      vf = vc + dvx(ic)*(x(i) - xc(ii))  
-!    ELSE  ! Central  
-!      uf = ufcd                                 
-!      vf = vfcd                                            
+!    ELSEIF(  uvct < half )THEN  ! Second order Upwind
+!      uf = uc + dux(ic)*(x(i) - xc(ii))
+!      vf = vc + dvx(ic)*(x(i) - xc(ii))
+!    ELSE  ! Central
+!      uf = ufcd
+!      vf = vfcd
 !    ENDIF
 
     fucds=f1(ij)*uf
@@ -214,14 +215,14 @@ DO i=2,xend
   END DO
 END DO
 
-!--FLUXES THROUGH INTERNAL NORTH CV FACES 
+!--FLUXES THROUGH INTERNAL NORTH CV FACES
 !--F2(IJ) is the mass flux through the north face (outward
 !--normal directed to N); FY(J) is the ratio of distance
-!--from P to cell face, to distance from P to N; IJ 
+!--from P to cell face, to distance from P to N; IJ
 !--denotes node P and IJN node N.
 !--Contribution of convective and diffusive fluxes from
 !--north face to AN(P), AS(N), and source terms at both
-!--P and N are calculated; contributions to AP(P) and 
+!--P and N are calculated; contributions to AP(P) and
 !--AP(N) come through the sum of neighbor coefficients
 !--and are not explicitly calculated.
 yend = njm+yPeriodic-1 !--Apply periodic conditions
@@ -235,7 +236,7 @@ DO j=2,yend
   DO i=2,nim
     ij =li(i)+j
     ijn=ij+1-j/njm*(j-1)
- 
+
     !--CELL FACE AREA S = DX*RN*1
     s=(x(i)-x(i-1))*r(j)
     !--COEFFICIENT RESULTING FROM DIFFUSIVE FLUX (SAME FOR U AND V)
@@ -243,7 +244,6 @@ DO j=2,yend
     d=visi*s/dypn
 
     !--EXPLICIT CONVECTIVE FLUXES FOR UDS AND CDS
-    
     cn=MIN(f2(ij),zero)
     cp=MAX(f2(ij),zero)
 
@@ -251,92 +251,91 @@ DO j=2,yend
     fvuds=cp*v(ij)+cn*v(ijn)
 
     IF( f2(ij) >= zero )THEN
-      
-      ic    = ij 
+
+      ic    = ij
       jj    = j
       uc    = u(ij)
       vc    = v(ij)
-      
+
       ud    = u(ijn)
       vd    = v(ijn)
-      
-      duv(1) = ud-uc 
-      duv(2) = vd-vc 
-     
-      graduv = dot_product(duv,duv) 
 
-      dduv(1) = two * duy(ic)*dypn 
-      dduv(2) = two * dvy(ic)*dypn 
+      duv(1) = ud-uc
+      duv(2) = vd-vc
+
+      graduv = dot_product(duv,duv)
+
+      dduv(1) = two * duy(ic)*dypn
+      dduv(2) = two * dvy(ic)*dypn
 
       gradCf   = dot_product(duv,dduv)
-     
+
       uvct    = one - graduv/(gradCf+small)
 
     ELSE
-      
+
       ic    = ijn
       jj    = j+1
       uc    = u(ijn)
       vc    = v(ijn)
-      
+
       ud    = u(ij)
       vd    = v(ij)
 
       duv(1) = ud-uc
       duv(2) = vd-vc
-     
+
       graduv = dot_product(duv,duv)
-     
-      dduv(1) = -two * duy(ic) * dypn 
-      dduv(2) = -two * dvy(ic) * dypn 
+
+      dduv(1) = -two * duy(ic) * dypn
+      dduv(2) = -two * dvy(ic) * dypn
 
       gradCf   = dot_product(duv,dduv)
-     
+
       uvCt    = one - graduv/(gradCf+small)
 
     ENDIF
 
     ufcd = u(ijn)*fyn+u(ij)*fyp
     vfcd = v(ijn)*fyn+v(ij)*fyp
-    
+
     IF( uvct <= zero .OR. uvct >= one )THEN        ! 0.1 <= Beta_m <= 0.5 upwind
-      uf = uc
-      vf = vc
-    ELSEIF( betam <= uvct .AND. uvct < one  )THEN  ! Central  
-      uf = ufcd                                 
-      vf = vfcd                                            
-    ELSEIF(  zero < uvct .AND. uvct < betam )THEN  ! Gamma 
-      fg = uvct / betam                           
-      uf = fg*ufcd + (one-fg)*uc                 
-      vf = fg*vfcd + (one-fg)*vc                           
+       uf = uc
+       vf = vc
+    ELSEIF( betam <= uvct .AND. uvct < one  )THEN  ! Central
+       uf = ufcd
+       vf = vfcd
+    ELSEIF(  zero < uvct .AND. uvct < betam )THEN  ! Gamma
+       fg = uvct / betam
+       uf = fg*ufcd + (one-fg)*uc
+       vf = fg*vfcd + (one-fg)*vc
     ENDIF
 
 !    IF( uvct <= zero .OR. uvct >= one )THEN        ! 0.1 <= Beta_m <= 0.5 upwind
 !      uf = uc
 !      vf = vc
-!    ELSEIF(  uvct <= half )THEN  ! Second order Upwind 
-!      uf = uc + duy(ic)*(y(j) - yc(jj))                
-!      vf = vc + dvy(ic)*(y(j) - yc(jj))  
-!    ELSE  ! Central  
-!      uf = ufcd                                 
-!      vf = vfcd                                            
+!    ELSEIF(  uvct <= half )THEN  ! Second order Upwind
+!      uf = uc + duy(ic)*(y(j) - yc(jj))
+!      vf = vc + dvy(ic)*(y(j) - yc(jj))
+!    ELSE  ! Central
+!      uf = ufcd
+!      vf = vfcd
 !    ENDIF
 
     fucds=f2(ij)*uf
     fvcds=f2(ij)*vf
 
     !--COEFFICIENTS AN(P) AND AS(N) DUE TO UDS
-    
     an(ij) = cn-d
     as(ijn)=-cp-d
-    
+
     !--SOURCE TERM CONTRIBUTIONS AT P AND N DUE TO DEFERRED CORRECTION
 
     su(ij) =su(ij) +gds(iu)*(fuuds-fucds)
     su(ijn)=su(ijn)-gds(iu)*(fuuds-fucds)
     sv(ij) =sv(ij) +gds(iu)*(fvuds-fvcds)
     sv(ijn)=sv(ijn)-gds(iu)*(fvuds-fvcds)
-    
+
     IF(temp_visc)THEN
       dun = visi*s*(dvx(ijn)*fyn+dvx(ij)*fyp)
       su(ij)  = su(ij) + dun
@@ -355,10 +354,10 @@ END DO
 !--are the width and height of the cell. Contribution to AP
 !--coefficient from volume integrals is stored temporarily
 !--in arrays APU and APV for U and V, respectively; these
-!--arrays are later used to store 1/AP, which is needed in 
+!--arrays are later used to store 1/AP, which is needed in
 !--the pressure-correction equation.
 DO i=2,nim
-  
+
   dx=x(i)-x(i-1)
 
   DO j=2,njm
@@ -370,9 +369,9 @@ DO i=2,nim
     ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
     ijn=ij+1-yPeriodic*j/njm*(j-1)
     ijs=ij-1+yPeriodic*Max(3-j,0)*(njm-1)
-    
-    !--CELL-FACE PRESSURE, CELL-CENTER GRADIENT, SOURCE 
-    
+
+    !--CELL-FACE PRESSURE, CELL-CENTER GRADIENT, SOURCE
+
     pe=p(ije)*fx(i)+p(ij)*(one-fx(i))
     pw=p(ij)*fx(i-1)+p(ijw)*(one-fx(i-1))
     pn=p(ijn)*fy(j)+p(ij)*(one-fy(j))
@@ -429,55 +428,49 @@ DO i=2,nim
 END DO
 
 IF(solver_type == solver_sparsekit)THEN
-  
+
   IF(use_GPU == use_GPU_yes)THEN
-    
+
     CALL fd_cooVal_create(ap,as,an,aw,ae,su,u)
-    
-    config%relativeTolerance = sor(iu)
-    config%maxIterations = nsw(iu)
-    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
+
+!    config%relativeTolerance = sor(iu)
+!    config%maxIterations = nsw(iu)
+!    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
                                 solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
-  
-    resor(iu) = res%residual%relative
-    
-!    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
-!    IF(error /= OPSUCCESS)GOTO 100
-    
-!    CALL cu_BiCGSTAB_setStop(nsw(iu),sor(iu),error)
-!    IF(error /= OPSUCCESS)GOTO 100
-    
-!    CALL  cu_BiCGSTAB_itr(resor(iu),ipar(1),error)
-!    IF(error /= SOLVER_DONE)GOTO 100
-    
-!    CALL  cu_cpD2H_solDP(sol,error)
-!    IF(error /= OPSUCCESS)GOTO 100
-    
-    IF(culaStat /= culaSparseNoError)THEN
-      WRITE(*,*)'CULA encoutered an error.'
-      culaStat=culaSparseDestroy(handle)
-      STOP
-    ENDIF
+
+!    resor(iu) = res%residual%relative
+     CALL cusp_biCGSTAB_copyH2D_system(Acoo, SOL, RHS, error)
+     IF(error /= OPSUCCESS)GOTO 100
+
+     CALL cusp_BiCGSTAB_solveDev_system(sor(iu),nsw(iu),absTol,error)
+     IF(error /= OPSUCCESS)GOTO 100
+
+     CALL cusp_BiCGSTAB_getMonitor(resor(iu),ipar(1),error)
+     IF(error /= OPSUCCESS)GOTO 100
+
+     CALL cusp_biCGSTAB_copyD2H_x(sol,error)
+
+!    IF(culaStat /= culaSparseNoError)THEN
+!      WRITE(*,*)'CULA encoutered an error.'
+!      culaStat=culaSparseDestroy(handle)
+!      STOP
+!    ENDIF
 
     CALL copy_solution(u,sol)
 
-!    IF(error == SOLVER_FAILED)THEN
-!      WRITE(*,*)'GPU-- x-Momentum solver failed to find solution.'
-!      STOP
-!      STOP
-!    ELSEIF(error /= OPSUCCESS)THEN
-!      WRITE(*,*)'GPU-- x-Momentum solver problem in CUDA operations.'
-!      STOP
-!      STOP
-!    ENDIF
-  ELSE
-    
+    IF(error /= OPSUCCESS)THEN
+      WRITE(*,*)'GPU-- x-Momentum solver problem in CUDA operations.'
+      STOP
+      STOP
+    ENDIF
+ ELSE
+
     CALL fd_cooVal_create(ap,as,an,aw,ae,su,u)
     CALL coocsr(Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc)
 
     ipar  =  0
     fpar  = 0.0
-  
+
     !--preconditioner
     !ipar(2) = 1     ! 1=left, 2=right
     ipar(2) = 0           ! 0 == no preconditioning
@@ -492,16 +485,16 @@ IF(solver_type == solver_sparsekit)THEN
         !                       WORK,Acsr,Aclc,Arwc)
     CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
                           WORK, Acsr,Aclc,Arwc,NNZ,Alu,Jlu,Ju,Jw)
-  
+
 
     CALL copy_solution(u,sol)
- 
+
     CALL calc_residual(ap,as,an,aw,ae,su,u,resor(iu))
 
   ENDIF
 
 ELSEIF(solver_type == solver_sip)THEN
-  
+
   CALL fd_solve_sip2d(ae,an,aw,as,ap,su,u,li,ni,nj,nsw(iu),resor(iu),sor(iu))
 
 ELSEIF(solver_type == solver_cg)THEN !--cann't be use
@@ -524,55 +517,51 @@ DO i=2,nim
 END DO
 
 IF(solver_type == solver_sparsekit)THEN
-  
+
   IF(use_GPU == use_GPU_yes)THEN
-    
+
     CALL fd_cooVal_create(ap,as,an,aw,ae,sv,v)
 
-    config%relativeTolerance = sor(iv)
-    config%maxIterations = nsw(iv)
-    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
+!    config%relativeTolerance = sor(iv)
+!    config%maxIterations = nsw(iv)
+!    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
                                 solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
-   
-    resor(iv) = res%residual%relative
 
-!    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
-!    IF(error /= OPSUCCESS)GOTO 200
-    
-!    CALL cu_BiCGSTAB_setStop(nsw(iv),sor(iv),error)
-!    IF(error /= OPSUCCESS)GOTO 200
-    
-!    CALL  cu_BiCGSTAB_itr(resor(iv),ipar(1),error)
-!    IF(error /= SOLVER_DONE)GOTO 200
-    
-!    CALL  cu_cpD2H_solDP(sol,error)
-!    IF(error /= OPSUCCESS)GOTO 200
-    
-    IF(culaStat /= culaSparseNoError)THEN
-      WRITE(*,*)'CULA encoutered an error.'
-      culaStat=culaSparseDestroy(handle)
-      STOP
-    ENDIF
+!    resor(iv) = res%residual%relative
+     CALL cusp_biCGSTAB_copyH2D_system(Acoo, SOL, RHS, error)
+     IF(error /= OPSUCCESS)GOTO 200
+
+     CALL cusp_BiCGSTAB_solveDev_system(sor(iv),nsw(iv),absTol,error)
+     IF(error /= OPSUCCESS)GOTO 200
+
+     CALL cusp_BiCGSTAB_getMonitor(resor(iv),ipar(1),error)
+     IF(error /= OPSUCCESS)GOTO 200
+
+     CALL cusp_biCGSTAB_copyD2H_x(sol,error)
+     IF(error /= OPSUCCESS)GOTO 200
+
+
+!    IF(culaStat /= culaSparseNoError)THEN
+!    WRITE(*,*)'CULA encoutered an error.'
+!     culaStat=culaSparseDestroy(handle)
+!      STOP
+!    ENDIF
 
     CALL copy_solution(v,sol)
 
-!    200 CONTINUE
-!    IF(error == SOLVER_FAILED)THEN
-!      WRITE(*,*)'GPU-- y-Momentum solver failed to find solution.'
-!      STOP
-!      STOP
-!    ELSEIF(error /= OPSUCCESS)THEN
-!      WRITE(*,*)'GPU-- y-Momentum solver problem in CUDA operations.'
-!      STOP
-!    ENDIF
+    200 CONTINUE
+    IF(error /= OPSUCCESS)THEN
+      WRITE(*,*)'GPU-- y-Momentum solver problem in CUDA operations.'
+      STOP
+    ENDIF
   ELSE
-    
+
     CALL fd_cooVal_create(ap,as,an,aw,ae,sv,v)
     CALL coocsr(Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc)
 
     ipar  =  0
     fpar  = 0.0
-  
+
     !--preconditioner
     !ipar(2) = 1     ! 1=left, 2=right
     ipar(2) = 0           ! 0 == no preconditioning
@@ -598,7 +587,7 @@ ELSEIF(solver_type == solver_sip)THEN
 
   CALL fd_solve_sip2d(ae,an,aw,as,ap,sv,v,li,ni,nj,nsw(iv),resor(iv),sor(iv))
 
-ELSEIF(solver_type == solver_cg)THEN !--cann't be used 
+ELSEIF(solver_type == solver_cg)THEN !--cann't be used
 
   CALL fd_solve_sip2d(ae,an,aw,as,ap,sv,v,li,ni,nj,nsw(iv),resor(iv),sor(iv))
 
@@ -607,7 +596,7 @@ ELSEIF(solver_type == solver_hypre)THEN
   !                  Hypre_A,Hypre_b,Hypre_x,2,nsw(iv))
 ENDIF
 
-!--Calculate velocity gradients !--This is fine as long as no symmetry BC present 
+!--Calculate velocity gradients !--This is fine as long as no symmetry BC present
 !--otherwise boundary velocities should be set
 DO i=2,nim
   dx=x(i)-x(i-1)
@@ -618,8 +607,8 @@ DO i=2,nim
     ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
     ijn=ij+1-yPeriodic*j/njm*(j-1)
     ijs=ij-1+yPeriodic*Max(3-j,0)*(njm-1)
-    !--CELL-CENTER GRADIENT 
-    
+    !--CELL-CENTER GRADIENT
+
     vele=u(ije)*fx(i)+u(ij)*(one-fx(i))
     velw=u(ij)*fx(i-1)+u(ijw)*(one-fx(i-1))
     veln=u(ijn)*fy(j)+u(ij)*(one-fy(j))

@@ -36,19 +36,20 @@ class cusp_biCGSTAB_solver
   valueType *xDev;
   valueType *bDev;
   cusp::monitor<valueType> monitor();
-
+  valueType residuals;
+  indexType solverItr;
 public:
   cusp_biCGSTAB_solver(indexType n_,indexType nnz_,valueType solTol_,indexType solMaxIt_):
     N(n_),nnz(nnz_){}
   int cusp_biCGSTAB_initDevice(indexType);
   int cusp_biCGSTAB_allocDevice(indexType, indexType );
-  int cusp_biCGSTAB_copyH2D_A(indexType *, indexType *, valueType*);
-  int cusp_biCGSTAB_copyH2D_x(valueType*);
-  int cusp_biCGSTAB_copyH2D_b(valueType*);
+  int cusp_biCGSTAB_copyH2D_AInds(indexType *, indexType *);
+  int cusp_biCGSTAB_copyH2D_system(valueType*, valueType*, valueType*);
   int cusp_biCGSTAB_copyD2H_x(valueType*);
-  int cusp_biCGSTAB_solveDev_sys(valueType, valueType, indexType);
+  int cusp_biCGSTAB_solveDev_system(valueType, valueType, indexType);
   //int cusp_biCGSTAB_setMonitor(valueType, indexType);
   int cusp_biCGSTAB_getMonitor(valueType &, indexType &);
+  int cusp_biCGSTAB_shutdown();
 };
 
 /* N: Number of unknowns

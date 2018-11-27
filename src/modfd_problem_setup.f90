@@ -41,20 +41,18 @@ USE shared_data,            ONLY : devID,solver_type,NNZ,NCel,lli,itim,time,lrea
                                    nnusseltpoints,calclocalnusselt,deltalen,sphnprt,betap,kappap,cpp,&
                                    mpi_comm,Hypre_A,Hypre_b,Hypre_x,nprocs_mpi,myrank_mpi,& !--viscosity temperature dependance
                                    temp_visc,viscgamma,calclocalnusselt_ave,naverage_steps,&
-                                   use_GPU,arow,acol,acoo,acsr,aclc,arwc,ndt,& !--CULA Variables
-                                   handle, platformOpts, formatOpts,  precondOpts, solverOpts, config,& !--Shared data
+                                   use_GPU,arow,acol,acoo,acsr,aclc,arwc,ndt,&!--DEM Shared data
                                    dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut,dem_dt,subTimeStep
-
-
-use cula_sparse_type
-use cula_sparse
+!--CULA Variables handle, platformOpts, formatOpts,  precondOpts, solverOpts, config
 
 USE modfd_set_bc,           ONLY : fd_bctime
 USE modfd_create_geom,      ONLY : fd_create_geom,fd_calc_mi,fd_calc_physprops,fd_calc_physprops,&
                                    fd_calc_quality,fd_init_temp,fd_find_rigidforce_contrib
 USE modfd_tecwrite,         ONLY : fd_tecwrite_sph_s,fd_tecwrite_sph_v,fd_tecwrite_eul
 
-!USE modcu_BiCGSTAB,         ONLY : cu_getInstance,cu_initDevice,cu_allocDevice,cu_shutdown,cu_coo2csr,cu_cpH2D_coords
+USE modcusp_library_intrf,  ONLY : getInstance_cusp_biCGSTAB_solver,&
+     cusp_biCGSTAB_initDevice,cusp_biCGSTAB_allocDevice,cusp_biCGSTAB_copyH2D_AInds, &
+     cusp_biCGSTAB_shutdown
 
 USE modfd_solve_linearsys,  ONLY : fd_cooInd_create
 IMPLICIT NONE
@@ -68,7 +66,7 @@ solver_type = solver_sparsekit
 itim = 0
 time = zero
 naverage_steps = 0
- 
+
 CALL fd_alloc_solctrl_arrays(alloc_create)
 
 READ(set_unit,6)title
@@ -77,14 +75,14 @@ READ(set_unit,*)xPeriodic,yPeriodic,use_GPU,devID
 IF(use_GPU /= use_GPU_no .AND. use_GPU /= use_GPU_yes)THEN
   WRITE(*,'(A, I5, A, I5)')'use_gpu should be:', use_GPU_yes,', or:', use_GPU_no
   STOP
-ENDIF 
+ENDIF
 
 IF((xPeriodic /= 0 .AND. xPeriodic /= 1) .OR. (yPeriodic /= 0 .AND. yPeriodic /= 1))THEN
   WRITE(*,*)'Periodic boundary controller variables should be 0 or 1.'
   STOP
 ENDIF
 
-IF((xPeriodic == 1 .OR. yPeriodic == 1) .AND. solver_type /= solver_sparsekit)THEN 
+IF((xPeriodic == 1 .OR. yPeriodic == 1) .AND. solver_type /= solver_sparsekit)THEN
   WRITE(*,*)'Periodic boundary controller only works with BiCGSTAB Solver set solver_type = solver_sparsekit.'
   STOP
 ENDIF
@@ -187,43 +185,43 @@ ENDDO
 
 NNZ = 2*(njm - 2 + yPeriodic)*(nim - 1) + 2*(nim - 2 + xPeriodic)*(njm - 1) + NCel
 IF(solver_type == solver_sparsekit .OR. solver_type == solver_hypre)THEN
-  
+
   CALL fd_alloc_spkit_arrays(alloc_create)
   CALL fd_cooInd_create() !--Create coordinate arrays Arow, Acol
 
   IF(use_GPU == use_GPU_yes)THEN
-    WRITE(*,*)'Initializing GPU using CULA ...'
-!    CALL cu_getInstance()
-!    IF(error /= OPSUCCESS)GOTO 100
-!    CALL cu_initDevice(devID,error)
-!    IF(error /= OPSUCCESS)GOTO 100
-!    CALL cu_allocDevice(NNZ,NCel,error)
-!    IF(error /= OPSUCCESS)GOTO 100
-!    CALL cu_cpH2D_coords(Arow,Acol,error)
-!    IF(error /= OPSUCCESS)GOTO 100
-!    CALL cu_coo2csr(error)
-!    IF(error /= OPSUCCESS)GOTO 100
-     IF(culaSparseCreate(handle) /= culaSparseNoError)GOTO 100
-     IF(culaSparseCudaOptionsInit(handle, platformOpts) /= culaSparseNoError)GOTO 100
-     platformOpts%deviceId=devId
-     platformOpts%useHybridFormat=1
-    IF(culaSparseCooOptionsInit(handle, formatOpts) /= culaSparseNoError)GOTO 100
-    formatOpts%indexing = 1
-    IF(culaSparseJacobiOptionsInit(handle, precondOpts) /= culaSparseNoError)GOTO 100
+    WRITE(*,*)'Initializing GPU using ...'
+    CALL getInstance_cusp_biCGSTAB_solver()
+
+    CALL cusp_biCGSTAB_initDevice(devID,error)
+    IF(error /= OPSUCCESS)GOTO 100
+
+    CALL cusp_biCGSTAB_allocDevice(NCel,NNZ,error)
+    IF(error /= OPSUCCESS)GOTO 100
+
+    CALL cusp_biCGSTAB_copyH2D_AInds(Arow,Acol,error)
+    IF(error /= OPSUCCESS)GOTO 100
+
+!     IF(culaSparseCreate(handle) /= culaSparseNoError)GOTO 100
+!     IF(culaSparseCudaOptionsInit(handle, platformOpts) /= culaSparseNoError)GOTO 100
+!     platformOpts%deviceId=devId
+!     platformOpts%useHybridFormat=1
+!    IF(culaSparseCooOptionsInit(handle, formatOpts) /= culaSparseNoError)GOTO 100
+!    formatOpts%indexing = 1
+!    IF(culaSparseJacobiOptionsInit(handle, precondOpts) /= culaSparseNoError)GOTO 100
     !IF(culaSparseEmptyOptionsInit(handle, precondOpts) /= culaSparseNoError)GOTO 100
-    IF(culaSparseConfigInit(handle, config) /= culaSparseNoError)GOTO 100
-    IF(culaSparseBicgstabOptionsInit(handle, solverOpts) /= culaSparseNoError)GOTO 100
+!    IF(culaSparseConfigInit(handle, config) /= culaSparseNoError)GOTO 100
+!    IF(culaSparseBicgstabOptionsInit(handle, solverOpts) /= culaSparseNoError)GOTO 100
     WRITE(*,*)'GPU Initialized.'
   ENDIF
 
   100 CONTINUE
-  IF(error /= culaSparseNoError)THEN
+  IF(error /= OPSUCCESS)THEN
     WRITE(*,*)'Unable to start the GPU. Running the solve on the CPU instead...'
     use_GPU = use_GPU_no
-!    CALL cu_shutdown(error)
+    CALL cusp_biCGSTAB_shutdown(error)
   ENDIF
 ENDIF
-!IF(solver_type == solver_hypre)CALL solve_hypre_sys_init(mpi_comm,myrank_mpi,nprocs_mpi,ncel,Hypre_A,Hypre_b,Hypre_x) 
 
 !--cv centres
 DO i=2,nim
@@ -283,7 +281,7 @@ IF(putobj)THEN
       domain_vol = domain_vol + (dx*dy*rp)**half
     ENDDO
   ENDDO
-            
+
   dxmean = domain_vol/REAL(ncell,r_single)
 ENDIF
 
@@ -326,14 +324,14 @@ ELSE
    flomas=zero
    flomom=zero
    DO j=2,njm
-     ij=li(1)+j 
+     ij=li(1)+j
      u(ij)=ulid
      f1(ij)=half*densit*(y(j)-y(j-1))*(r(j)+r(j-1))*u(ij)
      ft1(ij)=half*cpf*densit*(y(j)-y(j-1))*(r(j)+r(j-1))*u(ij)
      flomas=flomas+f1(ij)
      flomom=flomom+f1(ij)*u(ij)
    END DO
- ELSE 
+ ELSE
   DO i=2,nim
     u(li(i)+nj)=ulid
   END DO
@@ -395,7 +393,7 @@ IF(putobj)THEN
 
   to = t
   too = to
-  
+
 ENDIF
 
 CALL fd_print_problem_setup
@@ -444,7 +442,7 @@ IF(putobj)THEN
       WRITE(out_unit,*)'fd_problem_restart: restart file inconsistency.'
       STOP
   ENDIF
-  
+
   CALL  fd_alloc_sources(alloc_create)
 
   READ(sres_unit)((x(i),j=1,nj),i=1,ni),((y(j),j=1,nj),i=1,ni),&
@@ -464,7 +462,7 @@ IF(putobj)THEN
          (fdsvb(ij),ij=1,nij),(fdsuc(ij),ij=1,nij),(fdsvc(ij),ij=1,nij),&
          (fdst(ij),ij=1,nij),(fdstc(ij),ij=1,nij),(lamvisc(ij),ij=1,nij),&
          (fdfcu(ij),ij=1,nij),(fdfcv(ij),ij=1,nij)
-  
+
   READ(sres_unit)ltemp_visc
   IF(ltemp_visc .NEQV. temp_visc)THEN
     WRITE(out_unit,*)'fd_problem_restart: restart file inconsistency in viscosity dependant switches.'
@@ -547,7 +545,7 @@ IF(putobj)THEN
       ENDDO
     ENDDO
   ENDIF
-  
+
   IF(calcsurfforce)THEN
     CALL fd_alloc_surfforce_arrays(alloc_create,MAXVAL(nsurfpoints(:),1))
     DO nn = 1,nsphere
@@ -563,7 +561,7 @@ IF(putobj)THEN
           READ(sres_unit)(surfpoint_interp(i,ik,ij,nn),i=1,4),surfinterpx(ik,ij,nn),surfinterpy(ik,ij,nn)
         ENDDO
       ENDDO
-    ENDDO      
+    ENDDO
   ENDIF
 
   maxnobjcell = MAXVAL(nobjcells(:),1)
@@ -617,7 +615,7 @@ IF(putobj)THEN
       ENDDO
 
     ENDDO
-        
+
   ENDIF
 
 ELSE
@@ -724,7 +722,7 @@ USE real_parameters, ONLY : zero
 USE shared_data,  ONLY : ulid,gravx,gravy,ni,li,t,alfa,urf,gds,dt,gamt,tper,densit,visc,ien,&
                          ltime,iu,iv,ip,lcal,cpf,kappaf
 USE parameters,   ONLY : out_unit
-IMPLICIT NONE 
+IMPLICIT NONE
 
 WRITE(out_unit,601) densit,visc
 
@@ -974,7 +972,7 @@ IF(create_or_destroy == alloc_create)THEN
   nusseltpoint_interp = zero
   nusseltinterpy = zero
   nusseltinterpx = zero
-  localnusselt = zero 
+  localnusselt = zero
 ELSEIF(create_or_destroy == alloc_destroy)THEN
   DEALLOCATE(nusseltpointx,nusseltpointy,nusseltpoint_cvy,nusseltpoint_cvx,&
            nusseltnx,nusseltny,nusseltds,nusseltcentx,nusseltcenty,&
@@ -1112,12 +1110,12 @@ END SUBROUTINE fd_alloc_objcell_vars
 SUBROUTINE fd_write_restart
 
 USE shared_data
-USE parameters,     ONLY : eres_unit  
+USE parameters,     ONLY : eres_unit
 
 IMPLICIT NONE
 
 INTEGER       :: ij,nn,ik,i,j
-  
+
   WRITE(eres_unit) xPeriodic,yPeriodic
 
   WRITE(eres_unit) itim,time,ni,nj,nim,njm,nij,dt
@@ -1203,7 +1201,7 @@ INTEGER       :: ij,nn,ik,i,j
       ENDDO
     ENDDO
   ENDIF
-  
+
   IF(calcsurfforce)THEN
     DO nn = 1,nsphere
       WRITE(eres_unit)(surfds(ij,nn),ij=1,nsurfpoints(nn)),&
@@ -1218,7 +1216,7 @@ INTEGER       :: ij,nn,ik,i,j
           WRITE(eres_unit)(surfpoint_interp(i,ik,ij,nn),i=1,4),surfinterpx(ik,ij,nn),surfinterpy(ik,ij,nn)
         ENDDO
       ENDDO
-    ENDDO      
+    ENDDO
   ENDIF
 
   DO nn=1,nsphere
@@ -1252,7 +1250,7 @@ INTEGER       :: ij,nn,ik,i,j
       ENDDO
 
     ENDDO
-        
+
   ENDIF
 
 END SUBROUTINE fd_write_restart
@@ -1283,13 +1281,13 @@ ENDDO
 !--SOUTH BOUNDARY (ISOTHERMAL WALL, NON-ZERO DIFFUSIVE FLUX)
 DO i=2,nim
   ij=li(i)+1
-  lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref)) 
+  lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref))
 ENDDO
 
-!--WEST BOUNDARY 
+!--WEST BOUNDARY
 DO j=2,njm
   ij=li(1)+j
-  lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref)) 
+  lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref))
 ENDDO
 
 
@@ -1297,25 +1295,25 @@ ENDDO
 IF(duct)THEN !--Outlet (zero grdient but t is not available use previous node)
   DO j=2,njm
     ij=li(ni)+j
-    lamvisc(ij) = -26.99 + 0.09*t(ij-nj) !/(one + viscgamma*(t(ij-nj) - tref)) 
+    lamvisc(ij) = -26.99 + 0.09*t(ij-nj) !/(one + viscgamma*(t(ij-nj) - tref))
   END DO
 ELSE
   IF(movingmesh)THEN !--Outlet
     DO j=2,njm
       ij=li(ni)+j
-      lamvisc(ij) = -26.99 + 0.09*t(ij-nj) !/(one + viscgamma*(t(ij-nj) - tref)) 
+      lamvisc(ij) = -26.99 + 0.09*t(ij-nj) !/(one + viscgamma*(t(ij-nj) - tref))
     END DO
   ELSE
     !--EAST BOUNDARY
     DO j=2,njm
       ij=li(ni)+j
-      lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref)) 
+      lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref))
     ENDDO
   ENDIF
 ENDIF
 
 
-END SUBROUTINE fd_update_visc 
+END SUBROUTINE fd_update_visc
 
 SUBROUTINE fd_calc_timeCoefs
 

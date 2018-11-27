@@ -33,18 +33,18 @@ USE shared_data,        ONLY : urf,ip,p,su,apu,apv,nim,njm,&
                                sor,resor,nsw,f1,f2,ft1,ft2,celcp,dpx,dpy,&
                                ltime,ap,ipr,jpr,ltest,pp,fdsu,fdsv,&
                                dux,duy,dvx,dvy,fdsuc,fdsvc,fdsub,fdsvb,putobj,&
-                               Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,&
+                               Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc,res, &
                                solver_type,rhs,sol,work,alu,jlu,ju,jw,ct1,ct2,ct3,&
-                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celcp,use_GPU,&
-                               handle, config, platformOpts, formatOpts, solverOpts, precondOpts, res, culaStat
+                               Hypre_A,Hypre_b,Hypre_x,mpi_comm,lli,celcp,use_GPU
+!handle, config, platformOpts, formatOpts, solverOpts, precondOpts, culaStat
 
-use cula_sparse_type
-use cula_sparse
+!use cula_sparse_type
+!use cula_sparse
 
 USE  modfd_solve_linearsys,  ONLY : fd_solve_sip2d,fd_spkit_interface,copy_solution,calc_residual,&
                                     fd_solve_cgs2d,fd_cooVal_create
-!USE modcu_BiCGSTAB,          ONLY : cu_cpH2D_sysDP,cu_BiCGSTAB_setStop,cu_BiCGSTAB_itr,&
-!                                 cu_cpD2H_solDP
+USE modcusp_library_intrf,   ONLY : cusp_biCGSTAB_copyH2D_system,cusp_BiCGSTAB_solveDev_system , &
+     cusp_biCGSTAB_getMonitor, cusp_biCGSTAB_copyD2H_x
 IMPLICIT NONE
 REAL(KIND = r_single) :: fxe,fxp,dxpe,s,d,fyn,fyp,dypn,&
                          dx,dy,rp,ppe,ppw,ppn,pps,dpxel,&
@@ -53,13 +53,13 @@ REAL(KIND = r_single) :: fxe,fxp,dxpe,s,d,fyn,fyp,dypn,&
                          !duxel,duxe,dvynl,dvyn,fdsuce,fdsvcn,dfyn,dfxe,c,K
 
 INTEGER               :: ij,i,j,ije,ijn,ijw,ijs,ijpref,ipar(16),debug,error,xend,yend
-REAL                  :: fpar(16)
+REAL                  :: fpar(16), absTol=0.D0
 
 debug = 0
 !--EAST CV FACES (S - AREA, VOLE - VOLUME BETWEEN P AND E)
 xend = nim+xPeriodic-1 !--Apply periodic conditions
 DO i=2,xend
-  
+
   dxpe=xc(i+1)-xc(i)
   fxe=fx(i)
   fxp=one-fxe
@@ -77,7 +77,7 @@ DO i=2,xend
     !--since the gradient calculated at cell face is second order
     !--accurate at that location; the velocity is interpolated linearly,
     !--to achieve second order accuracy at cell face center.
- 
+
     dpxel=half*(dpx(ije)+dpx(ij))
     uel=u(ije)*fxe+u(ij)*fxp
     apue=apu(ije)*fxe+apu(ij)*fxp
@@ -87,12 +87,12 @@ DO i=2,xend
 
     pcor=apue*vole*(dpxe-dpxel)
 
-    ue=uel - pcor 
-    
+    ue=uel - pcor
+
     f1(ij) = d*ue
     ft1(ij)= difft*ue
     !--COEFFICIENTS OF P' EQUATION, AE(P) AND AW(E)
-    
+
     ae(ij)=-d*apue*s
     aet(ij)=-difft*apue*s
     aw(ije)=ae(ij)
@@ -120,7 +120,7 @@ DO j=2,yend
     dpynl=half*(dpy(ijn)+dpy(ij))
     vnl=v(ijn)*fyn+v(ij)*fyp
     apvn=apv(ijn)*fyn+apv(ij)*fyp
-    
+
     !dvynl=half*(dvy(ijn)+dvy(ij))
     !--CELL-FACE GRADIENT, VELOCITY AND MASS FLUX
 
@@ -129,8 +129,8 @@ DO j=2,yend
     !dfyn=(fdsv(ijn)-fdsv(ij))/dypn
     pcor=apvn*voln*(dpyn-dpynl)
 
-    vn=vnl - pcor 
-    
+    vn=vnl - pcor
+
     f2(ij)=d*vn
     ft2(ij)=difft*vn
     !--COEFFICIENTS OF P' EQUATION, AN(P) AND AS(N)
@@ -156,10 +156,10 @@ DO i=2,nim
     ij=li(i)+j
     ijs=ij-1+yPeriodic*Max(3-j,0)*(njm-1)
     ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
-    su(ij)=f1(ijw)-f1(ij)+f2(ijs)-f2(ij) 
+    su(ij)=f1(ijw)-f1(ij)+f2(ijs)-f2(ij)
     IF(putobj)THEN
       su(ij) = su(ij) + (ct3*denoo(ij) + ct2*deno(ij) - ct1*den(ij)) *  ((x(i)-x(i-1))*(y(j)-y(j-1))*half*(r(j)+r(j-1)))
-    ENDIF 
+    ENDIF
     ap(ij)=-(ae(ij)+aw(ij)+an(ij)+as(ij))
     sum=sum+su(ij)
     pp(ij)=zero
@@ -171,75 +171,71 @@ IF(ltest) WRITE(2,*) '       SUM = ',SUM
 
 !--SOLVE EQUATIONS SYSTEM FOR P' AND APPLY CORRECTIONS
 IF(solver_type == solver_sparsekit)THEN
-  
+
    SOL = 0.0
   IF(use_GPU == use_GPU_yes)THEN
-    
+
     CALL fd_cooVal_create(ap,as,an,aw,ae,su,pp)
 
-    config%relativeTolerance = sor(ip)
-    config%maxIterations = nsw(ip)
-    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
-                                solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)   
+!    config%relativeTolerance = sor(ip)
+!    config%maxIterations = nsw(ip)
+!    culaStat = culaSparseCudaDcooBicgstabJacobi(handle, config, platformOpts, formatOpts, &
+!                                solverOpts, precondOpts, NCel, NNZ, Acoo, Arow, Acol, sol, rhs, res)
 
-!    CALL cu_cpH2D_sysDP(Acoo, RHS, SOL,error)
-!    IF(error /= OPSUCCESS)GOTO 100
-    
-!    CALL cu_BiCGSTAB_setStop(nsw(ip),sor(ip),error)
-!    IF(error /= OPSUCCESS)GOTO 100
-    
-!    CALL  cu_BiCGSTAB_itr(resor(ip),ipar(1),error)
-!    IF(error /= SOLVER_DONE)GOTO 100
-    
-!    CALL  cu_cpD2H_solDP(sol,error)
-!    IF(error /= OPSUCCESS)GOTO 100
-   
-    IF(culaStat /= culaSparseNoError)THEN
-      WRITE(*,*)'CULA encoutered an error.'
-      culaStat=culaSparseDestroy(handle)
-      STOP
-    ENDIF
+    CALL cusp_biCGSTAB_copyH2D_system(Acoo, SOL, RHS, error)
+    IF(error /= OPSUCCESS)GOTO 100
 
-    CALL copy_solution(pp,sol)
-!    100 CONTINUE
-!    IF(error == SOLVER_FAILED)THEN
-!      WRITE(*,*)'GPU--Pressure solver failed to find solution.'
-!      STOP
-!      STOP
-!    ELSEIF(error /= OPSUCCESS)THEN
-!      WRITE(*,*)'GPU--Pressure solver problem in CUDA operations.'
-!      STOP
+    CALL cusp_BiCGSTAB_solveDev_system(sor(ip),nsw(ip),absTol,error)
+    IF(error /= OPSUCCESS)GOTO 100
+
+    CALL cusp_BiCGSTAB_getMonitor(resor(ip),ipar(1),error)
+    IF(error /= OPSUCCESS)GOTO 100
+
+    CALL cusp_biCGSTAB_copyD2H_x(sol,error)
+    IF(error /= OPSUCCESS)GOTO 100
+
+!    IF(culaStat /= culaSparseNoError)THEN
+!      WRITE(*,*)'CULA encoutered an error.'
+!      culaStat=culaSparseDestroy(handle)
 !      STOP
 !    ENDIF
-  ELSE
-      
+
+    CALL copy_solution(pp,sol)
+    100 CONTINUE
+    IF(error /= OPSUCCESS)THEN
+      WRITE(*,*)'GPU--Pressure solver problem in CUDA operations.'
+      STOP
+      STOP
+    ENDIF
+ ELSE
+
       CALL fd_cooVal_create(ap,as,an,aw,ae,su,pp)
       CALL coocsr(Ncel,NNZ,Acoo,Arow,Acol,Acsr,Aclc,Arwc)
 
       ipar  =  0
       fpar  = 0.0
-      
+
       !--preconditioner
       !ipar(2) = 1     ! 1=left, 2=right
       ipar(2) = 0           ! 0 == no preconditioning
       ipar(3) = 0
       ipar(4) = NNZ*8       ! workspace for BGStab
       ipar(6) = nsw(ip)     ! maximum number of matrix-vector multiplies
-    
+
       fpar(1) = sor(ip)  ! relative tolerance, must be between (0, 1)
       fpar(2) = 0.0      ! absolute tolerance, must be positive
-    
+
           !call solve_spars(debug,IOdbg,Ncel,RHS,SOL,ipar,fpar,&
           !                       WORK,Acsr,Aclc,Arwc)
       CALL solve_spars(debug,out_unit,Ncel,RHS,SOL,ipar,fpar,&
                             WORK, Acsr,Aclc,Arwc,NNZ,Alu,Jlu,Ju,Jw)
-   
+
      CALL copy_solution(pp,sol)
 
      CALL calc_residual(ap,as,an,aw,ae,su,pp,resor(ip))
 
    ENDIF
-    
+
 
 ELSEIF(solver_type == solver_sip)THEN
 
@@ -264,7 +260,7 @@ CALL fd_bcpressure(pp)
 ijpref=li(ipr)+jpr
 ppo=pp(ijpref)
 
-!--CORRECT EAST MASS FLUXES 
+!--CORRECT EAST MASS FLUXES
 DO i=2,xend
   DO j=2,njm
     ij = li(i) + j
@@ -274,7 +270,7 @@ DO i=2,xend
   END DO
 END DO
 
-!--CORRECT NORTH MASS FLUXES 
+!--CORRECT NORTH MASS FLUXES
 
 DO i=2,nim
   DO j=2,yend
@@ -291,10 +287,10 @@ DO i=2,nim
     ij=li(i)+j
     ijs=ij-1+yPeriodic*Max(3-j,0)*(njm-1)
     ijw=ij-nj+xPeriodic*Max(3-i,0)*(nim-1)*nj
-    su(ij)=f1(ijw)-f1(ij)+f2(ijs)-f2(ij) 
+    su(ij)=f1(ijw)-f1(ij)+f2(ijs)-f2(ij)
     IF(putobj)THEN
       su(ij) = su(ij) +  (ct3*denoo(ij) + ct2*deno(ij) - ct1*den(ij)) *  ((x(i)-x(i-1))*(y(j)-y(j-1))*half*(r(j)+r(j-1)))
-    ENDIF 
+    ENDIF
     sum=sum+ABS(su(ij))
   END DO
 END DO

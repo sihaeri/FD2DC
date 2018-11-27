@@ -58,26 +58,22 @@ int cusp_biCGSTAB_solver::cusp_biCGSTAB_allocDevice(indexType n, indexType m)
   return OPSUCCESS;
 }
 
-int cusp_biCGSTAB_solver::cusp_biCGSTAB_copyH2D_A(indexType *rows, indexType *cols, valueType *vals)
+int cusp_biCGSTAB_solver::cusp_biCGSTAB_copyH2D_AInds(indexType *rows, indexType *cols)
 {
   if(cudaMemcpy(cooRowIndADev, rows, nnz*sizeof(cooRowIndADev[0]),
                 cudaMemcpyHostToDevice) != cudaSuccess) return OPERROR;
   if(cudaMemcpy(cooColIndADev, cols, nnz*sizeof(cooColIndADev[0]),
                 cudaMemcpyHostToDevice) != cudaSuccess) return OPERROR;
-  if(cudaMemcpy(cooValADev, vals, nnz*sizeof(cooValADev[0]),
-                cudaMemcpyHostToDevice) != cudaSuccess) return OPERROR;
   return OPSUCCESS;
 }
 
-int cusp_biCGSTAB_solver::cusp_biCGSTAB_copyH2D_x(valueType *xHost)
-{
-  if(cudaMemcpy(xDev, xHost, N*sizeof(xDev[0]),cudaMemcpyHostToDevice) != cudaSuccess) return OPERROR;
-  return OPSUCCESS;
-}
-
-int cusp_biCGSTAB_solver::cusp_biCGSTAB_copyH2D_b(valueType *bHost)
+int cusp_biCGSTAB_solver::cusp_biCGSTAB_copyH2D_system(valueType *Avals, valueType *xHost, valueType *bHost)
 {
   if(cudaMemcpy(bDev, bHost, N*sizeof(bDev[0]),cudaMemcpyHostToDevice) != cudaSuccess) return OPERROR;
+  if(cudaMemcpy(xDev, xHost, N*sizeof(xDev[0]),cudaMemcpyHostToDevice) != cudaSuccess) return OPERROR;
+  if(cudaMemcpy(cooValADev, Avals, nnz*sizeof(cooValADev[0]),
+                cudaMemcpyHostToDevice) != cudaSuccess) return OPERROR;
+
   return OPSUCCESS;
 }
 
@@ -87,7 +83,7 @@ int cusp_biCGSTAB_solver::cusp_biCGSTAB_copyD2H_x(valueType *xHost)
   return OPSUCCESS;
 }
 
-int cusp_biCGSTAB_solver::cusp_biCGSTAB_solveDev_sys(valueType relTol,
+int cusp_biCGSTAB_solver::cusp_biCGSTAB_solveDev_system(valueType relTol,
                                                       valueType absTol,
                                                       indexType maxItr)
 {
@@ -114,14 +110,29 @@ int cusp_biCGSTAB_solver::cusp_biCGSTAB_solveDev_sys(valueType relTol,
 
   cusp::krylov::bicgstab(A, x, b, monitor, M);
 
+  residuals = monitor.residual_norm();
+  solverItr = monitor.iteration_count();
+
   return OPSUCCESS;
 
 }
 
-int cusp_biCGSTAB_solver::cusp_biCGSTAB_getMonitor(valueType &residual, indexType &nItr)
+int cusp_biCGSTAB_solver::cusp_biCGSTAB_getMonitor(valueType &res, indexType &nItr)
 {
-  nItr = monitor.iteration_count();
-  residual = monitor.residual_norm();
+  nItr = solverItr;
+  res = residuals;
+  return OPSUCCESS;
+}
+
+int cusp_biCGSTAB_solver::cusp_biCGSTAB_shutdown()
+{
+
+  if(cudaFree(cooRowIndADev) != cudaSuccess)return OPERROR;
+  if(cudaFree(cooColIndADev) != cudaSuccess)return OPERROR;
+  if(cudaFree(cooValADev) != cudaSuccess)return OPERROR;
+  if(cudaFree(xDev) != cudaSuccess)return OPERROR;
+  if(cudaFree(bDev) != cudaSuccess)return OPERROR;
+
   return OPSUCCESS;
 }
 
@@ -146,18 +157,17 @@ extern "C" int cusp_biCGSTAB_allocDevice_intrf(void *cusp_biCGSTAB_solver_ptr, i
   return ptr->cusp_biCGSTAB_allocDevice(n,m);
 }
 
-extern "C" int cusp_biCGSTAB_copyH2D_A_intrf(void *cusp_biCGSTAB_solver_ptr,
-                                             indexType *rows, indexType *cols,
-                                             valueType *vals)
+extern "C" int cusp_biCGSTAB_copyH2D_AInds_intrf(void *cusp_biCGSTAB_solver_ptr,
+                                             indexType *rows, indexType *cols)
 {
   cusp_biCGSTAB_solver *ptr = static_cast<cusp_biCGSTAB_solver*>(cusp_biCGSTAB_solver_ptr);
-  return ptr->cusp_biCGSTAB_copyH2D_A(rows,cols,vals);
+  return ptr->cusp_biCGSTAB_copyH2D_AInds(rows,cols);
 }
 
-extern "C" int cusp_biCGSTAB_copyH2D_x_intrf(void *cusp_biCGSTAB_solver_ptr,valueType *xHost)
+extern "C" int cusp_biCGSTAB_copyH2D_system_intrf(void *cusp_biCGSTAB_solver_ptr,valueType *Avals, valueType *xHost, valueType *bHost)
 {
   cusp_biCGSTAB_solver *ptr = static_cast<cusp_biCGSTAB_solver*>(cusp_biCGSTAB_solver_ptr);
-  return ptr->cusp_biCGSTAB_copyH2D_x(xHost);
+  return ptr->cusp_biCGSTAB_copyH2D_system(Avals, xHost, bHost);
 
 }
 
@@ -168,23 +178,23 @@ extern "C" int cusp_biCGSTAB_copyD2H_x_intrf(void *cusp_biCGSTAB_solver_ptr,valu
 
 }
 
-extern "C" int cusp_biCGSTAB_copyH2D_b_intrf(void *cusp_biCGSTAB_solver_ptr,valueType *bHost)
-{
-  cusp_biCGSTAB_solver *ptr = static_cast<cusp_biCGSTAB_solver*>(cusp_biCGSTAB_solver_ptr);
-  return ptr->cusp_biCGSTAB_copyH2D_b(bHost);
-}
-
-extern "C" int cusp_biCGSTAB_solveDev_sys_intrf(void *cusp_biCGSTAB_solver_ptr,
+extern "C" int cusp_biCGSTAB_solveDev_system_intrf(void *cusp_biCGSTAB_solver_ptr,
                                         valueType relTol, valueType absTol,
                                         indexType maxItr)
 {
   cusp_biCGSTAB_solver *ptr = static_cast<cusp_biCGSTAB_solver*>(cusp_biCGSTAB_solver_ptr);
-  return ptr->cusp_biCGSTAB_solveDev_sys(relTol, absTol, maxItr);
+  return ptr->cusp_biCGSTAB_solveDev_system(relTol, absTol, maxItr);
 }
 
 extern "C" int cusp_biCGSTAB_getMonitor_intrf(void *cusp_biCGSTAB_solver_ptr,
-                                        valueType &residual, valueType &nItr)
+                                        valueType &residual, indexType &nItr)
 {
   cusp_biCGSTAB_solver *ptr = static_cast<cusp_biCGSTAB_solver*>(cusp_biCGSTAB_solver_ptr);
   return ptr->cusp_biCGSTAB_getMonitor(residual, nItr);
+}
+
+extern "C" int cusp_biCGSTAB_shutdown_intrf(void *cusp_biCGSTAB_solver_ptr)
+{
+  cusp_biCGSTAB_solver *ptr = static_cast<cusp_biCGSTAB_solver*>(cusp_biCGSTAB_solver_ptr);
+  return ptr->cusp_biCGSTAB_shutdown();
 }
