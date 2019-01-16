@@ -10,6 +10,8 @@
 #include <cusp/krylov/bicgstab.h>
 #include <cusp/array1d.h>
 #include <cusp/precond/diagonal.h>
+#include <cusp/precond/aggregation/smoothed_aggregation.h>
+#include <cusp/precond/ainv.h>
 
 #define SOLVER_FAILED -2
 #define OPSUCCESS 0

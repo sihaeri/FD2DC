@@ -29,7 +29,7 @@ int cusp_biCGSTAB_solver::cusp_biCGSTAB_initDevice(indexType devID)
           cudaGetDeviceProperties(&deviceProp, devID);
           printf("\nRunning on device %d: \"%s\"\n", devID, deviceProp.name);
           char msg[256];
-          SPRINTF(msg, "  Total amount of global memory:                 %.0f MBytes (%llu bytes)\n", (float)deviceProp.totalGlobalMem/1048576.0f, (unsigned long long) deviceProp.totalGlobalMem);
+          SPRINTF(msg, "Total amount of global memory:                 %.0f MBytes (%llu bytes)\n", (float)deviceProp.totalGlobalMem/1048576.0f, (unsigned long long) deviceProp.totalGlobalMem);
           printf("%s", msg);
           printf("  (%2d) Multiprocessors, (%3d) CUDA Cores/MP:     %d CUDA Cores\n",
                  deviceProp.multiProcessorCount,
