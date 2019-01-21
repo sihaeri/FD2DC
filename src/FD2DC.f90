@@ -55,7 +55,7 @@ REAL(KIND = r_single) :: source,fd_resor,cd,cl,avenusselt,vb_resor,dummy
 REAL(KIND = r_single),ALLOCATABLE :: wallocnusselt(:)
 DOUBLE PRECISION      :: delt1,delt2,T1,T2
 
-fd_resor = zero 
+fd_resor = zero
 vb_resor = zero
 
 CALL fd_open
@@ -92,7 +92,7 @@ IF(ltime .AND. lwrite)THEN
     CALL create_filenum(maxfl,filenum)
   ENDIF
 ENDIF
-npoint = 0 !--for time steps used in time averaging 
+npoint = 0 !--for time steps used in time averaging
 nwpoint= 0 !--for time steps used for wall nusselt number averaging
 
 IF(initFromFile)THEN
@@ -131,31 +131,38 @@ timeloop: DO itim = itims,itime
   !--OUTER ITERATIONS (SIMPLE RELAXATIONS)
 
   DO iter=1,maxit
-!    T1 = omp_get_wtime()
-    IF(lcal(iu)) CALL fd_calc_mom
-    IF(xPeriodic == 0)THEN
-      IF(lcal(iu).AND.duct) CALL fd_bcout
-      IF(lcal(iu).AND.movingmesh) CALL fd_bcout
-    ENDIF
-    IF(lcal(ip)) CALL fd_calc_pre
-    IF(lcal(ien)) CALL fd_calc_temp
-    IF(temp_visc)CALL fd_update_visc
-    IF(putobj)THEN
-      IF(nsphere>0)CALL fd_calc_sources(force_correct,fd_resor,iter)
-    ENDIF
-!    T2 = omp_get_wtime()
-!    OPEN(UNIT = 12345,FILE='TIME.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
-!    WRITE(12345,*) T2-T1, delt1
-!    CLOSE(12345)
-    !--CHECK CONVERGENCE OF OUTER ITERATIONS
-    WRITE(out_unit,606) iter,resor(iu),resor(iv),resor(ip),&
-                resor(ien),vb_resor,u(ijmon),v(ijmon),p(ijmon),t(ijmon)
-    source=MAX(resor(iu),resor(iv),resor(ip),resor(ien))
-    IF(source>slarge)THEN
+     !    T1 = omp_get_wtime()
+     IF(lcal(iu)) CALL fd_calc_mom
+     IF(xPeriodic == 0)THEN
+        IF(lcal(iu).AND.duct) CALL fd_bcout
+        IF(lcal(iu).AND.movingmesh) CALL fd_bcout
+     ENDIF
+     IF(lcal(ip)) CALL fd_calc_pre
+     IF(lcal(ien)) CALL fd_calc_temp
+     IF(temp_visc)CALL fd_update_visc
+     IF(putobj)THEN
+        IF(nsphere>0)THEN
+           CALL fd_calc_sources(force_predict,fd_resor,iter)
+           CALL fd_calc_ori
+           CALL fd_calc_pos(iter)
+           CALL fd_calc_mi
+           CALL fd_calc_physprops(iter)
+           CALL fd_update_fieldvel
+        ENDIF
+     ENDIF
+     !    T2 = omp_get_wtime()
+     !    OPEN(UNIT = 12345,FILE='TIME.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
+     !    WRITE(12345,*) T2-T1, delt1
+     !    CLOSE(12345)
+     !--CHECK CONVERGENCE OF OUTER ITERATIONS
+     WRITE(out_unit,606) iter,resor(iu),resor(iv),resor(ip),&
+          resor(ien),vb_resor,u(ijmon),v(ijmon),p(ijmon),t(ijmon)
+     source=MAX(resor(iu),resor(iv),resor(ip),resor(ien))
+     IF(source>slarge)THEN
         PRINT *,'  *** TERMINATED - OUTER ITERATIONS DIVERGING ***'
         STOP
-    ENDIF
-    IF(source < sormax .AND. iter > minit) EXIT
+     ENDIF
+     IF(source < sormax .AND. iter > minit) EXIT
   END DO
 
   !--CONVERGED: IF UNSTEADY FLOW, PRINT AND SAVE NPRTth SOLUTION
@@ -166,13 +173,13 @@ timeloop: DO itim = itims,itime
       IF(lcal(ip)) CALL fd_print_var(P,'PRESS.')
       IF(lcal(ien)) CALL fd_print_var(T,'TEMPER')
     ENDIF
-    
+
     CALL fd_calc_integrals
 
     IF(lwrite .AND. ltime) THEN
       n = n +1
       OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//filenum(n)//'.plt',STATUS='NEW')
-      
+
       IF(temp_visc)THEN
         CALL fd_tecwrite_eul(plt_unit,lamvisc)
       ELSE
@@ -181,15 +188,15 @@ timeloop: DO itim = itims,itime
       CLOSE(plt_unit)
 
     ELSEIF(lwrite .AND. .NOT. ltime)THEN
-     
+
       OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//'.plt',STATUS='NEW')
-      
+
       IF(temp_visc)THEN
         CALL fd_tecwrite_eul(plt_unit,lamvisc)
       ELSE
         CALL fd_tecwrite_eul(plt_unit)
       ENDIF
-       
+
       CLOSE(plt_unit)
     ENDIF
   ENDIF
@@ -201,7 +208,7 @@ timeloop: DO itim = itims,itime
     !######Only for vertical oscillating sphere########
     WRITE(1234,'(2(E12.5,1X))') cd,cl
     CLOSE(1234)
-  ENDIF 
+  ENDIF
   IF(nsphere > 0)THEN
     IF((ltime.AND.MOD(itim,sphnprt)==0).AND.lwrite) THEN
       l = l +1
@@ -216,10 +223,6 @@ timeloop: DO itim = itims,itime
   ENDIF
 
   IF(nsphere > 0)THEN
-    !CALL fd_calc_surf_force(densref,0.1,1.0)
-    CALL fd_calc_ori
-    CALL fd_calc_pos(OUTER_ITR_DONE,itim-itims+1)
-    CALL fd_calc_mi
     IF(.NOT. stationary)THEN
       IF(lwrite)THEN
         DO nn = 1,nsphere
@@ -236,16 +239,8 @@ timeloop: DO itim = itims,itime
         ENDDO
       ENDIF
     ENDIF
-    CALL fd_calc_physprops(OUTER_ITR_DONE)
-    CALL fd_update_fieldvel
-    IF(nsphere > 0 .AND. movingmesh)CALL fd_move_mesh(ismoved)
-    IF(stationary)THEN
-      CALL fd_calc_sources(force_correct,fd_resor,iter)
-    ELSE
-      CALL fd_calc_sources(force_predict,fd_resor,iter)
-    ENDIF
   ENDIF
-  !IF( time*ulid/objradius(1) > 90.0)CALL fd_calculate_stats(1,do_collect_stat) 
+  !IF( time*ulid/objradius(1) > 90.0)CALL fd_calculate_stats(1,do_collect_stat)
   !CALL fd_calculate_stats(1,do_collect_stat)
   IF(calclocalnusselt_ave)THEN
     IF( (itime - itims + 1) <= naverage_steps .OR. (itime - itim + 1) <= naverage_steps)THEN
@@ -309,7 +304,7 @@ IF(calcwalnusselt .AND. .NOT. duct)THEN
       WRITE(plt_unit,'(2(E12.5,1X))') yc(nn),wallocnusselt(nn)/nwpoint
     ENDDO
     CLOSE(plt_unit)
-    DEALLOCATE(wallocnusselt)    
+    DEALLOCATE(wallocnusselt)
   ENDIF
 
 ENDIF
