@@ -1342,8 +1342,8 @@ ELSE
     lindispx = objcentx(nn) - objcentxo(nn) + (zobjcentx(nn) - zobjcentxo(nn))*LDomainx
     lindispy = objcenty(nn) - objcentyo(nn) + (zobjcenty(nn) - zobjcentyo(nn))*LDomainy
 
-      objcentu(nn) = lindispx/dt
-      objcentv(nn) = lindispy/dt
+    !  objcentu(nn) = lindispx/dt
+    !  objcentv(nn) = lindispy/dt
 
     !--Update the material points
     !--orientation updated in a seperate subroutine

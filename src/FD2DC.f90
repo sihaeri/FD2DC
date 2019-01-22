@@ -132,6 +132,17 @@ timeloop: DO itim = itims,itime
 
   DO iter=1,maxit
      !    T1 = omp_get_wtime()
+     IF(putobj)THEN
+        IF(nsphere>0)THEN
+           CALL fd_calc_sources(force_predict,fd_resor,iter)
+           CALL fd_calc_ori
+           CALL fd_calc_pos(iter)
+           CALL fd_calc_mi
+           CALL fd_calc_physprops(iter)
+           !CALL fd_update_fieldvel
+        ENDIF
+     ENDIF
+
      IF(lcal(iu)) CALL fd_calc_mom
      IF(xPeriodic == 0)THEN
         IF(lcal(iu).AND.duct) CALL fd_bcout
@@ -140,16 +151,6 @@ timeloop: DO itim = itims,itime
      IF(lcal(ip)) CALL fd_calc_pre
      IF(lcal(ien)) CALL fd_calc_temp
      IF(temp_visc)CALL fd_update_visc
-     IF(putobj)THEN
-        IF(nsphere>0)THEN
-           CALL fd_calc_sources(force_predict,fd_resor,iter)
-           CALL fd_calc_ori
-           CALL fd_calc_pos(iter)
-           CALL fd_calc_mi
-           CALL fd_calc_physprops(iter)
-           CALL fd_update_fieldvel
-        ENDIF
-     ENDIF
      !    T2 = omp_get_wtime()
      !    OPEN(UNIT = 12345,FILE='TIME.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
      !    WRITE(12345,*) T2-T1, delt1
