@@ -985,9 +985,13 @@ END SUBROUTINE fd_alloc_nusselt_arrays
 SUBROUTINE fd_alloc_objgeom_arrays(create_or_destroy,max_point)
 
 USE parameters,       ONLY : alloc_create,alloc_destroy,out_unit
-USE shared_data,      ONLY : surfpointx,surfpointy,nsurfpoints,nsphere,&
+USE shared_data,      ONLY : surfpointx,surfpointy,&
+                             surfpointxo,surfpointyo,&
+                             nsurfpoints,nsphere,&
                              surfpointxinit,surfpointyinit,forcedmotion,&
-                             zsurfpointx,zsurfpointy
+                             zsurfpointx,zsurfpointy,&
+                             zsurfpointxo,zsurfpointyo
+
 USE real_parameters,  ONLY : zero
 
 IMPLICIT NONE
@@ -997,14 +1001,22 @@ INTEGER                 :: ierror
 
 IF(create_or_destroy == alloc_create)THEN
     ALLOCATE(surfpointx(max_point,nsphere),surfpointy(max_point,nsphere),&
-             zsurfpointx(max_point,nsphere),zsurfpointy(max_point,nsphere),STAT=ierror)
+             zsurfpointx(max_point,nsphere),zsurfpointy(max_point,nsphere),&
+             surfpointxo(max_point,nsphere),surfpointyo(max_point,nsphere),&
+             zsurfpointxo(max_point,nsphere),zsurfpointyo(max_point,nsphere),&
+             STAT=ierror)
     IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate onject arrays.'
-    surfpointx = zero
-    surfpointy = zero
-    zsurfpointx = 0
-    zsurfpointy = 0
+    surfpointx   = zero
+    surfpointy   = zero
+    zsurfpointx  = 0
+    zsurfpointy  = 0
+    surfpointxo  = zero
+    surfpointyo  = zero
+    zsurfpointxo = 0
+    zsurfpointyo = 0
 ELSEIF(create_or_destroy == alloc_destroy)THEN
-    DEALLOCATE(surfpointx,surfpointy,zsurfpointx,zsurfpointy)
+    DEALLOCATE(surfpointx,surfpointy,zsurfpointx,zsurfpointy,&
+               surfpointxo,surfpointyo,zsurfpointxo,zsurfpointyo)
 ENDIF
 
 END SUBROUTINE fd_alloc_objgeom_arrays

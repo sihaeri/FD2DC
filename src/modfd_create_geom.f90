@@ -26,7 +26,8 @@ SUBROUTINE fd_create_geom
 
 USE shared_data,        ONLY : objcentx,objcenty,objradius,objbradius,nsurfpoints,&
                                surfpointx,surfpointy,njm,nim,nobjcells,&
-                               objcellx,objcelly,objcelldx,objcelldy,objcellvol,&
+                               objcellx,objcelly,objcellxo,objcellyo,&
+                               objcelldx,objcelldy,objcellvol,&
                                x,y,r,objpoint_cvx,objpoint_cvy,densitp,mcellpercv,&
                                nsphere,surfds,surfnx,surfny,surfcentrex,surfcentrey,&
                                calcsurfforce,xc,yc,surfpoint_cvx,surfpoint_cvy,&
@@ -35,8 +36,10 @@ USE shared_data,        ONLY : objcentx,objcenty,objradius,objbradius,nsurfpoint
                                nusseltcentx,nusseltcenty,nusseltds,nusseltnx,nusseltny,nusseltpoint_interp,&
                                nusseltinterpx,nusseltinterpy,nusseltpoint_cvx,nusseltpoint_cvy,objvol,&
                                surfpointxinit,surfpointyinit,zsurfpointx,zsurfpointy,zobjcellx,zobjcelly,&
-                               zobjcellvertx,zobjcellverty,xPeriodic,yPeriodic,LDomainx,LDomainy,&
-                               objcellvertx,objcellverty,objpoint_interpx,objpoint_interpy,&
+                               zobjcellxo,zobjcellyo,zobjcellvertx,zobjcellverty,&
+                               zobjcellvertxo,zobjcellvertyo,xPeriodic,yPeriodic,LDomainx,LDomainy,&
+                               objcellvertx,objcellverty,objcellvertxo,objcellvertyo,&
+                               objpoint_interpx,objpoint_interpy,&
                                problem_name,problem_len,read_fd_geom,dxmean,hypre_A,Hypre_b,Hypre_x,mpi_comm ,nij,&
                                dxmeanmovedtot,objcentxinit,objcentyinit,objcellxinit,dxmeanmoved,dxmin,&
                                objcellyinit,objcellvertxinit,objcellvertyinit,forcedmotion,objcell_bndflag
@@ -185,9 +188,17 @@ IF(.NOT. read_fd_geom)THEN
            objpoint_cvy(maxnobjcell,nsphere),objcellvertx(4,maxnobjcell,nsphere),objcellverty(4,maxnobjcell,nsphere),&
            zobjcellvertx(4,maxnobjcell,nsphere),zobjcellverty(4,maxnobjcell,nsphere),&
            objpoint_interpx(2,maxnobjcell,nsphere),objpoint_interpy(2,maxnobjcell,nsphere),&
-           objcell_bndFlag(maxnobjcell,nsphere))
+           objcell_bndFlag(maxnobjcell,nsphere),&
+           objcellxo(maxnobjcell,nsphere),objcellyo(maxnobjcell,nsphere),&
+           zobjcellxo(maxnobjcell,nsphere),zobjcellyo(maxnobjcell,nsphere),&
+           objcellvertxo(4,maxnobjcell,nsphere),objcellvertyo(4,maxnobjcell,nsphere),&
+           zobjcellvertxo(4,maxnobjcell,nsphere),zobjcellvertyo(4,maxnobjcell,nsphere))
+
+
   zobjcellx = 0; zobjcelly = 0
   zobjcellvertx = 0; zobjcellverty = 0
+  zobjcellxo = 0; zobjcellyo = 0
+  zobjcellvertxo = 0; zobjcellvertyo = 0
   objcell_bndFlag = 0
   DO n = 1,nsphere
 
@@ -207,6 +218,10 @@ IF(.NOT. read_fd_geom)THEN
     objcellverty(4,1:nobjcells(n),n) = objcelly(1:nobjcells(n),n) + half*dummydy(1:nobjcells(n),n)
 
   ENDDO
+  objcellxo = objcellx
+  objcellyo = objcelly
+  objcellvertxo = objcellvertx
+  objcellvertyo = objcellverty
 
   IF(xPeriodic == 1)THEN
     DO n = 1,nsphere
@@ -1186,11 +1201,16 @@ USE parameters,       ONLY : OUTER_ITR_DONE
 USE precision,        ONLY : r_single
 USE shared_data,      ONLY : nsphere,nobjcells,objcentmi,objcentxo,objcentyo,objcellx,objcelly,&
                              objcentxo,objcentyo,dt,objcentu,objcentv,objcento,objpoint_interpx,objpoint_interpy,&
-                             objcellvertx,objcellverty,objcentx,objcenty,objcentuo,objcentvo,calcsurfforce,&
-                             objpoint_cvx,objpoint_cvy,nsurfpoints,surfpointx,surfpointy,dxmeanmoved,up,vp,omp,&
+                             objcellvertx,objcellverty,objcellvertxo,objcellvertyo,&
+                             objcentx,objcenty,objcentuo,objcentvo,calcsurfforce,&
+                             objpoint_cvx,objpoint_cvy,nsurfpoints,&
+                             surfpointx,surfpointy,surfpointxo,surfpointyo,&
+                             dxmeanmoved,up,vp,omp,&
                              forcedmotion,lread,Fpq,Fpw,objvol,densitp,x,y,xc,yc,objcellvol,li,fdfcu,fdfcv,&
                              zobjcentx,zobjcentxo,zobjcenty,zobjcentyo,zobjcellx,zobjcelly,LDomainx,LDomainy,&
-                             zobjcellvertx,zobjcellverty,nim,njm,zsurfpointx,zsurfpointy,objcell_bndFlag,subTimeStep
+                             zobjcellvertx,zobjcellverty,nim,njm,zsurfpointx,zsurfpointy,&
+                             zobjcellvertxo,zobjcellvertyo,zsurfpointxo,zsurfpointyo,&
+                             objcell_bndFlag,subTimeStep
 USE real_parameters,  ONLY : zero,three,two,half,one,four
 
 IMPLICIT NONE
@@ -1208,9 +1228,7 @@ INTEGER,ALLOCATABLE,SAVE                    :: zobjcellxo(:,:),zobjcellyo(:,:)
 
 
 IF(firstCall)THEN
-ALLOCATE( objcellxo(MAXVAL(nobjcells,1),nsphere),objcellyo(MAXVAL(nobjcells,1),nsphere),&
-          zobjcellxo(MAXVAL(nobjcells,1),nsphere),zobjcellyo(MAXVAL(nobjcells,1),nsphere),&
-          tempFpq(2,nsphere),tempFpw(2,nsphere),temp2Fpq(2,nsphere),temp2Fpw(2,nsphere)  )
+ALLOCATE( tempFpq(2,nsphere),tempFpw(2,nsphere),temp2Fpq(2,nsphere),temp2Fpw(2,nsphere)  )
 
 tempFpq = zero
 tempFpq = zero
@@ -1223,20 +1241,44 @@ ENDIF
 
 IF(titr == 1)THEN
    !--Set the old time step variables
-   objcentxo(1:nsphere) = objcentx(1:nsphere)
-   objcentyo(1:nsphere) = objcenty(1:nsphere)
-   zobjcentxo(1:nsphere)= zobjcentx(1:nsphere)
-   zobjcentyo(1:nsphere)= zobjcenty(1:nsphere)
-   temp2Fpq(:,1:nsphere)  = Fpq(:,1:nsphere)
-   temp2Fpw(:,1:nsphere)  = Fpw(:,1:nsphere)
+   objcentxo = objcentx
+   objcentyo = objcenty
+   zobjcentxo= zobjcentx
+   zobjcentyo= zobjcenty
+   objcellxo = objcellx
+   objcellyo = objcelly
+   zobjcellxo = zobjcellx
+   zobjcellyo = zobjcelly
+   objcellvertxo = objcellvertx
+   objcellvertyo = objcellverty
+   zobjcellvertxo = zobjcellvertx
+   zobjcellvertyo = zobjcellverty
+   surfpointxo = surfpointx
+   surfpointyo = surfpointy
+   zsurfpointxo = zsurfpointx
+   zsurfpointyo = zsurfpointy
+   temp2Fpq  = Fpq
+   temp2Fpw  = Fpw
 ELSE
    !--set the currect variables to old values
-   objcentx(1:nsphere) = objcentxo(1:nsphere)
-   objcenty(1:nsphere) = objcentyo(1:nsphere)
-   zobjcentx(1:nsphere)= zobjcentxo(1:nsphere)
-   zobjcenty(1:nsphere)= zobjcentyo(1:nsphere)
-   Fpq(:,1:nsphere)  = temp2Fpq(:,1:nsphere)
-   Fpw(:,1:nsphere)  = temp2Fpw(:,1:nsphere)
+   objcentx = objcentxo
+   objcenty = objcentyo
+   zobjcentx= zobjcentxo
+   zobjcenty= zobjcentyo
+   objcellx = objcellxo
+   objcelly = objcellyo
+   zobjcellx = zobjcellxo
+   zobjcelly = zobjcellyo
+   objcellvertx = objcellvertxo
+   objcellverty = objcellvertyo
+   zobjcellvertx = zobjcellvertxo
+   zobjcellverty = zobjcellvertyo
+   surfpointx = surfpointxo
+   surfpointy = surfpointyo
+   zsurfpointx = zsurfpointxo
+   zsurfpointy = zsurfpointyo
+   Fpq  = temp2Fpq
+   Fpw  = temp2Fpw
 ENDIF
 
 IF(forcedmotion)THEN

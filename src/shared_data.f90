@@ -214,6 +214,7 @@ REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE   :: objqp,objtp,densitp,betap,ob
 REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: objcento
 !--allocatable for 1..Max(nobjcells),1..nsphere
 REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: surfpointx,surfpointy,objcellx,objcelly,&
+                                                    surfpointxo,surfpointyo,objcellxo,objcellyo,&
                                                     objcelldx,objcelldy,objcellvol,obju,objv,&
                                                     objfx,objfy,objru,objrv,objt,objrt,objq,&
                                                     objapu,objapv,objapt,nusseltpointx,nusseltpointy,&
@@ -222,18 +223,24 @@ REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: surfpointx,surfpointy,objcel
 !--The arrays start at zero, one is added if a point crosses the east (north) boundary and one is substracted if the point passes
 !--the west (south) boundary. Naming is similar to the name of the array with a z (zone) added at the beggining
 INTEGER,ALLOCATABLE,DIMENSION(:)                 :: zobjcentx,zobjcenty,zobjcentxo,zobjcentyo
-INTEGER,ALLOCATABLE,DIMENSION(:,:)               :: zsurfpointx,zsurfpointy,zobjcellx,zobjcelly
-INTEGER,ALLOCATABLE,DIMENSION(:,:,:)             :: zobjcellvertx,zobjcellverty
+INTEGER,ALLOCATABLE,DIMENSION(:,:)               :: zsurfpointx,zsurfpointy,zobjcellx,zobjcelly,&
+                                                    zsurfpointxo,zsurfpointyo,zobjcellxo,zobjcellyo
+
+INTEGER,ALLOCATABLE,DIMENSION(:,:,:)             :: zobjcellvertx,zobjcellverty,&
+                                                    zobjcellvertxo,zobjcellvertyo
+
 
 INTEGER,DIMENSION(:,:),ALLOCATABLE               :: objcell_bndFlag !--Keeps track of objcells outside boundaries
 INTEGER,DIMENSION(:),ALLOCATABLE                 :: rigidforce_contrib !--Keep track of which particle contributes to the constraint
                                                                        !--on cell ij
 !--Particle Collision forces, 
 !--Fpq, sum of forces on particle p due to all other particles q /= p, 
-!--Fpw, sum of forces on particle p due to all walls  
+!--Fpw, sum of forces on particle p due to 
 REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: Fpq,Fpw
 
-REAL(KIND = r_single),DIMENSION(:,:,:),ALLOCATABLE :: objcellvertx,objcellverty,t_locnusselt
+REAL(KIND = r_single),DIMENSION(:,:,:),ALLOCATABLE :: objcellvertx,objcellverty,&
+                                                      objcellvertxo,objcellvertyo,&
+                                                      t_locnusselt
 INTEGER,DIMENSION(:,:),ALLOCATABLE               :: objpoint_cvx,objpoint_cvy
 INTEGER,DIMENSION(:,:,:),ALLOCATABLE             :: objpoint_interpx,objpoint_interpy
 
