@@ -128,8 +128,8 @@ timeloop: DO itim = itims,itime
   IF(putobj)THEN
     !IF(nsphere>0)CALL fd_calc_sources(force_correct,fd_resor,0)
   ENDIF
+  
   !--OUTER ITERATIONS (SIMPLE RELAXATIONS)
-
   DO iter=1,maxit
      !    T1 = omp_get_wtime()
      IF(lcal(iu)) CALL fd_calc_mom
@@ -140,19 +140,7 @@ timeloop: DO itim = itims,itime
      IF(lcal(ip)) CALL fd_calc_pre
      IF(lcal(ien)) CALL fd_calc_temp
      IF(temp_visc)CALL fd_update_visc
-     IF(putobj)THEN
-        IF(nsphere>0)THEN
-           CALL fd_calc_sources(no_force,fd_resor,iter)
-           CALL fd_calc_ori
-           CALL fd_calc_pos(iter)
-           CALL fd_calc_mi
-           CALL fd_calc_physprops(iter)
-           CALL fd_calc_sources(force_predict,fd_resor,iter)
-           !CALL fd_update_fieldvel
-        ENDIF
-     ENDIF
-
-
+     
      !    T2 = omp_get_wtime()
      !    OPEN(UNIT = 12345,FILE='TIME.dat',STATUS = 'UNKNOWN',ACCESS = 'APPEND')
      !    WRITE(12345,*) T2-T1, delt1
@@ -224,8 +212,11 @@ timeloop: DO itim = itims,itime
       CLOSE(plt_unit)
     ENDIF
   ENDIF
-
   IF(nsphere > 0)THEN
+    !CALL fd_calc_surf_force(densref,0.1,1.0)
+    CALL fd_calc_ori
+    CALL fd_calc_pos(OUTER_ITR_DONE,itim-itims+1)
+    CALL fd_calc_mi
     IF(.NOT. stationary)THEN
       IF(lwrite)THEN
         DO nn = 1,nsphere
@@ -241,6 +232,14 @@ timeloop: DO itim = itims,itime
           CLOSE(1234);CLOSE(1235)
         ENDDO
       ENDIF
+    ENDIF
+    CALL fd_calc_physprops(OUTER_ITR_DONE)
+    !CALL fd_update_fieldvel
+    IF(nsphere > 0 .AND. movingmesh)CALL fd_move_mesh(ismoved)
+    IF(stationary)THEN
+      CALL fd_calc_sources(force_correct,fd_resor,iter)
+    ELSE
+      CALL fd_calc_sources(force_predict,fd_resor,iter)
     ENDIF
   ENDIF
   !IF( time*ulid/objradius(1) > 90.0)CALL fd_calculate_stats(1,do_collect_stat)

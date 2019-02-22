@@ -234,9 +234,10 @@ INTEGER,DIMENSION(:,:),ALLOCATABLE               :: objcell_bndFlag !--Keeps tra
 INTEGER,DIMENSION(:),ALLOCATABLE                 :: rigidforce_contrib !--Keep track of which particle contributes to the constraint
                                                                        !--on cell ij
 !--Particle Collision forces, 
-!--Fpq, sum of forces on particle p due to all other particles q /= p, 
-!--Fpw, sum of forces on particle p due to 
-REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: Fpq,Fpw
+!--Fpq, sum of forces on particle p due to all other particles q /= p (over a
+!sub-timestep, Fpqt, is the total force during one timestep
+!--Fpw, sum of forces on particle p due to collision with walls
+REAL(KIND = r_single),DIMENSION(:,:),ALLOCATABLE :: Fpq,Fpw, Fpqt,Fpwt
 
 REAL(KIND = r_single),DIMENSION(:,:,:),ALLOCATABLE :: objcellvertx,objcellverty,&
                                                       objcellvertxo,objcellvertyo,&

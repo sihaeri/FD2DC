@@ -22,7 +22,7 @@ CONTAINS
 !============================================
 SUBROUTINE fd_problem_setup
 
-USE real_parameters,        ONLY : zero,one,two,three,four,pi,half,quarter,vlarge,vsmall,oneandhalf,fourthird,small
+USE real_parameters,        ONLY : zero,one,two,three,four,pi,half,quarter,fifth,vlarge,vsmall,oneandhalf,fourthird,small
 USE parameters,             ONLY : out_unit,set_unit,alloc_create,nphi,grd_unit,max_char_len,solver_sparsekit,solver_sip,&
                                    solver_cg,solver_hypre,plt_unit,init_field_unit,use_GPU_yes,use_GPU_no,&
                                    OPSUCCESS
@@ -135,7 +135,7 @@ IF(putobj)THEN
     ENDDO
     !--Estimate the collision time for the spring-dashpot model
     dem_dt = four/three*pi*(SUM(densitp)/nsphere)*(SUM(objradius)/nsphere)**3
-    dem_dt = pi/SQRT(two*dem_kn/dem_dt-(dem_gamman/two)**2)
+    dem_dt = fifth*pi/SQRT(two*dem_kn/dem_dt-(dem_gamman/two)**2)
     subTimeStep = MAX(1,FLOOR(dt/dem_dt))
     WRITE(*,*) 'DEM dt= ', dem_dt, ' , flow dt= ', dt, ', sub-steps= ',subTimeStep
     IF(.NOT. lread)THEN
@@ -896,7 +896,7 @@ USE shared_data,      ONLY : nsphere,objtp,objqp,fd_urf,densitp,objcentx,objcent
                              nobjcells,mcellpercv,nnusseltpoints,objcentmi,objvol,&
                              objcento,objcentxo,objcentyo,objcentvo,objcentuo,objcentomo,&
                              betap,up,vp,omp,forcedmotion,stationary,isotherm,objbradius,cpp,kappap,&
-                             Fpq,Fpw,zobjcentx,zobjcenty,zobjcentxo,zobjcentyo
+                             Fpq,Fpw,zobjcentx,zobjcenty,zobjcentxo,zobjcentyo,Fpqt,Fpwt
 USE real_parameters,  ONLY : zero
 
 IMPLICIT NONE
@@ -912,7 +912,7 @@ IF(create_or_destroy == alloc_create)THEN
           objcentxo(nsphere),objcentyo(nsphere),objcentvo(nsphere),objcentuo(nsphere),&
           objcentomo(nsphere),betap(nsphere),objbradius(nsphere),cpp(nsphere),kappap(nsphere),&
           Fpq(2,nsphere),Fpw(2,nsphere),zobjcentx(nsphere),zobjcenty(nsphere),&
-          zobjcentxo(nsphere),zobjcentyo(nsphere),STAT=ierror)
+          zobjcentxo(nsphere),zobjcentyo(nsphere),Fpqt(2,nsphere),Fpwt(2,nsphere),STAT=ierror)
   IF(ierror /= 0)WRITE(out_unit,*)'Not enough memory to allocate onject arrays.'
   IF(forcedmotion .OR. stationary)THEN
     ALLOCATE(up(nsphere),vp(nsphere),omp(nsphere))
@@ -929,7 +929,8 @@ IF(create_or_destroy == alloc_create)THEN
   objcento = zero;objcentxo = zero ;objcentyo = zero
   objcentvo = zero;objcentuo = zero;objcentomo = zero;betap = zero
   objbradius = zero;cpp = zero;kappap = zero
-  Fpq = zero; Fpw = zero; zobjcentx = 0; zobjcenty = 0; zobjcentxo = 0; zobjcentyo = 0
+  Fpq = zero; Fpw = zero; Fpqt = zero; Fpwt = zero 
+  zobjcentx = 0; zobjcenty = 0; zobjcentxo = 0; zobjcentyo = 0
 ELSEIF(create_or_destroy == alloc_destroy)THEN
   DEALLOCATE(objtp,densitp,objcentx,objcenty,objradius,objcentu,objcentv,objcentom,nsurfpoints,nobjcells,&
              mcellpercv,objcentmi,objvol,objcento,objcentxo,objcentyo,objcentvo,objcentuo,objcentomo,betap,&

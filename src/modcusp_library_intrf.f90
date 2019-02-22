@@ -14,7 +14,7 @@ MODULE modcusp_library_intrf
 
   INTERFACE
 
-     FUNCTION getInstance_cusp_biCGSTAB_solver_intrf RESULT(ptr) BIND (C,name='getInstance_cusp_biCGSTAB_solver')
+     FUNCTION getInstance_cusp_biCGSTAB_solver_intrf() RESULT(ptr) BIND (C,name='getInstance_cusp_biCGSTAB_solver')
        USE, INTRINSIC :: iso_c_binding, ONLY : c_ptr
        IMPLICIT NONE
        TYPE(c_ptr) :: ptr
