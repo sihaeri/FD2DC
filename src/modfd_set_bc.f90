@@ -114,21 +114,21 @@ INTEGER               :: i,j,ij
 
 
 IF(yPeriodic == 0)THEN
-  IF(duct)THEN
-  !--Use slip walls
-    DO i=2,nim
-      ij=li(i)+2
-      d=lamvisc(ij-1)*(x(i)-x(i-1))*r(1)/(yc(2)-yc(1))
-      apv(ij)=apv(ij)+d
-    END DO
-
-    DO i=2,nim
-      ij=li(i)+njm
-      d=lamvisc(ij+1)*(x(i)-x(i-1))*r(njm)/(yc(nj)-yc(njm))
-      apv(ij)=apv(ij)+d
-    END DO
-
-  ELSE
+!  IF(duct)THEN
+!  !--Use slip walls
+!    DO i=2,nim
+!      ij=li(i)+2
+!      d=lamvisc(ij-1)*(x(i)-x(i-1))*r(1)/(yc(2)-yc(1))
+!      apv(ij)=apv(ij)+d
+!    END DO
+!
+!    DO i=2,nim
+!      ij=li(i)+njm
+!      d=lamvisc(ij+1)*(x(i)-x(i-1))*r(njm)/(yc(nj)-yc(njm))
+!      apv(ij)=apv(ij)+d
+!    END DO
+!
+!  ELSE
     DO i=2,nim
       ij=li(i)+2
       d=lamvisc(ij-1)*(x(i)-x(i-1))*r(1)/(yc(2)-yc(1))
@@ -142,7 +142,7 @@ IF(yPeriodic == 0)THEN
       apu(ij)=apu(ij)+d
       su(ij) =su(ij) +d*u(ij+1)
     END DO
-  ENDIF
+ ! ENDIF
 ENDIF
 !--west
 IF(xPeriodic == 0)THEN
