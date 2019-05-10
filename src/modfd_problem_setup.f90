@@ -1280,7 +1280,7 @@ SUBROUTINE fd_update_visc
 ! commented out
 USE precision,        ONLY : r_single
 USE shared_data,      ONLY : lamvisc,nim,njm,visc,tref,li,viscgamma,t,duct,movingmesh,ni,nj,th,tc,dux,duy,dvx,dvy,viscN
-USE real_parameters,  ONLY : one,two,real_1e2,real_1em6,zero
+USE real_parameters,  ONLY : one,two,real_1e3,real_1em6,zero,vsmall
 
 IMPLICIT NONE
 REAL(KIND = r_single) :: nm1,gamdot
@@ -1294,62 +1294,42 @@ ELSE
   DO i = 2,nim
     DO j = 2,njm
       ij = li(i) + j
-      gamdot = sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)
-      IF(gamdot > zero)THEN
-        gamdot = visc*SQRT(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)**nm1
-        lamvisc(ij) = MIN(real_1e2,MAX(gamdot,real_1em6))
-      ELSE
-        lamvisc(ij) = visc
-      ENDIF
+      gamdot = max(vsmall,sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)) 
+      gamdot = visc*gamdot**nm1
+      lamvisc(ij) = MIN(real_1e3,MAX(gamdot,real_1em6))
     ENDDO
   ENDDO
 
   !--NORTH BOUNDARY
   DO i=2,nim
     ij=li(i)+nj
-    gamdot = sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)
-    IF(gamdot > zero)THEN
-      gamdot = visc*SQRT(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)**nm1
-      lamvisc(ij) = MIN(real_1e2,MAX(gamdot,real_1em6))
-    ELSE
-      lamvisc(ij) = visc
-    ENDIF
+    gamdot = max(vsmall,sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)) 
+    gamdot = visc*gamdot**nm1
+    lamvisc(ij) = MIN(real_1e3,MAX(gamdot,real_1em6))
   ENDDO
 
   !--SOUTH BOUNDARY 
   DO i=2,nim
     ij=li(i)+1
-    gamdot = sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)
-    IF(gamdot > zero)THEN
-      gamdot = visc*SQRT(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)**nm1
-      lamvisc(ij) = MIN(real_1e2,MAX(gamdot,real_1em6))
-    ELSE
-      lamvisc(ij) = visc
-    ENDIF
+    gamdot = max(vsmall,sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)) 
+    gamdot = visc*gamdot**nm1
+    lamvisc(ij) = MIN(real_1e3,MAX(gamdot,real_1em6))
   ENDDO
 
   !--WEST BOUNDARY
   DO j=2,njm
     ij=li(1)+j
-    gamdot = sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)
-    IF(gamdot > zero)THEN
-      gamdot = visc*SQRT(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)**nm1
-      lamvisc(ij) = MIN(real_1e2,MAX(gamdot,real_1em6))
-    ELSE
-      lamvisc(ij) = visc
-    ENDIF  
+    gamdot = max(vsmall,sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)) 
+    gamdot = visc*gamdot**nm1
+    lamvisc(ij) = MIN(real_1e3,MAX(gamdot,real_1em6))
   ENDDO
 
   !--EAST BOUDARY
   DO j=2,njm
     ij=li(ni)+j
-    gamdot = sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)
-    IF(gamdot > zero)THEN
-      gamdot = visc*SQRT(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)**nm1
-      lamvisc(ij) = MIN(real_1e2,MAX(gamdot,real_1em6))
-    ELSE
-      lamvisc(ij) = visc
-    ENDIF   
+    gamdot = max(vsmall,sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)) 
+    gamdot = visc*gamdot**nm1
+    lamvisc(ij) = MIN(real_1e3,MAX(gamdot,real_1em6))
   ENDDO
 
 ENDIF
