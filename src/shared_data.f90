@@ -104,7 +104,7 @@ REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: sor,resor,urf,gds
 !-- th,tc: hot and cold wall temperature (th input temp for flow problem)
 !-- celbeta, celcp, celkappa: cell values for beta cp and kappa !For implementation celbeta actually holds beta*desity
 !-- viscgamma: for temperature dependant viscosity, to be used in conjunction with temp_visc
-REAL(KIND = r_single) :: densit,visc,tref,th,tc,cpf,kappaf,viscgamma
+REAL(KIND = r_single) :: densit,visc,tref,th,tc,cpf,kappaf,viscgamma,viscN
 REAL(KIND = r_single),DIMENSION(:),ALLOCATABLE :: celbeta,celcp,celcpo,celcpoo,celkappa,den,deno,denoo,u,v,p,pp,t,f1,f2,dpx,&
                                                   dpy,dux,duy,dvx,dvy,dtx,dty,lamvisc,ft1,ft2
 

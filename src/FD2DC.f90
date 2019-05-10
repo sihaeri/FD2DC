@@ -237,7 +237,7 @@ timeloop: DO itim = itims,itime
     !CALL fd_update_fieldvel
     IF(nsphere > 0 .AND. movingmesh)CALL fd_move_mesh(ismoved)
     IF(stationary)THEN
-      CALL fd_calc_sources(force_correct,fd_resor,iter)
+      CALL fd_calc_sources(force_predict,fd_resor,iter)
     ELSE
       CALL fd_calc_sources(force_predict,fd_resor,iter)
     ENDIF

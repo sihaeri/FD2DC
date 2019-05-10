@@ -629,7 +629,7 @@ DO i=2,nim
   ENDDO
 ENDDO
 
-!IF(temp_visc)CALL fd_calc_bcuv_grad
+IF(temp_visc)CALL fd_calc_bcuv_grad
 
 END SUBROUTINE fd_calc_mom
 

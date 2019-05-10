@@ -40,7 +40,7 @@ USE shared_data,            ONLY : devID,solver_type,NNZ,NCel,lli,itim,time,lrea
                                    densitp,fd_urf,mcellpercv,objtp,nsphere,calcsurfforce,rigidForce_contrib,& !--heat
                                    nnusseltpoints,calclocalnusselt,deltalen,sphnprt,betap,kappap,cpp,&
                                    mpi_comm,Hypre_A,Hypre_b,Hypre_x,nprocs_mpi,myrank_mpi,& !--viscosity temperature dependance
-                                   temp_visc,viscgamma,calclocalnusselt_ave,naverage_steps,&
+                                   temp_visc,viscgamma,viscN,calclocalnusselt_ave,naverage_steps,&
                                    use_GPU,arow,acol,acoo,acsr,aclc,arwc,ndt,&!--DEM Shared data
                                    dem_kn,dem_kt,dem_gamman,dem_gammat,dem_mut,dem_dt,subTimeStep
 !--CULA Variables handle, platformOpts, formatOpts,  precondOpts, solverOpts, config
@@ -106,7 +106,7 @@ READ(set_unit,*)(nsw(i),i=1,nphi)
 READ(set_unit,*)(gds(i),i=1,nphi)
 
 READ(set_unit,*)temp_visc
-IF(temp_visc)READ(set_unit,*)viscgamma
+IF(temp_visc)READ(set_unit,*)viscN
 READ(set_unit,*)calcwalnusselt
 IF(calcwalnusselt)READ(set_unit,*)calcwalnusselt_ave,naverage_wsteps
 READ(set_unit,*)putobj,read_fd_geom,stationary,forcedmotion,movingmesh,calcsurfforce,calclocalnusselt,isotherm
@@ -337,7 +337,7 @@ ELSE
     u(li(i)+nj)=ulid
   END DO
   DO i=2,nim
-    u(li(i)+1)=-ulid
+    u(li(i)+1)=zero
   END DO
 ENDIF
 ENDIF
@@ -400,7 +400,12 @@ ENDIF
 CALL fd_print_problem_setup
 
 OPEN(UNIT = plt_unit,FILE=problem_name(1:problem_len)//'_init.plt',STATUS='NEW')
-CALL fd_tecwrite_eul(plt_unit)
+IF(temp_visc)THEN
+  CALL fd_tecwrite_eul(plt_unit,lamvisc)
+ELSE
+  CALL fd_tecwrite_eul(plt_unit)
+ENDIF
+
 CLOSE(plt_unit)
 !ALLOCATE(volp(nij,nsphere),q(nsphere))
 !
@@ -1271,60 +1276,129 @@ END SUBROUTINE fd_write_restart
 
 
 SUBROUTINE fd_update_visc
-
-USE shared_data,      ONLY : lamvisc,nim,njm,visc,tref,li,viscgamma,t,duct,movingmesh,ni,nj,th,tc
-USE real_parameters,  ONLY : one
+! This is adopted to model a power-law fluid - themperature dependance is
+! commented out
+USE precision,        ONLY : r_single
+USE shared_data,      ONLY : lamvisc,nim,njm,visc,tref,li,viscgamma,t,duct,movingmesh,ni,nj,th,tc,dux,duy,dvx,dvy,viscN
+USE real_parameters,  ONLY : one,two,real_1e2,real_1em6,zero
 
 IMPLICIT NONE
-
+REAL(KIND = r_single) :: nm1,gamdot
 INTEGER       :: i,j,ij
 
-DO i = 2,nim
-  DO j = 2,njm
-    ij = li(i) + j
-    lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref))
+nm1 = viscN - one
+IF(nm1 == zero)THEN
+  lamvisc = visc
+ELSE
+
+  DO i = 2,nim
+    DO j = 2,njm
+      ij = li(i) + j
+      gamdot = sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)
+      IF(gamdot > zero)THEN
+        gamdot = visc*SQRT(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)**nm1
+        lamvisc(ij) = MIN(real_1e2,MAX(gamdot,real_1em6))
+      ELSE
+        lamvisc(ij) = visc
+      ENDIF
+    ENDDO
   ENDDO
-ENDDO
 
-!--NORTH BOUNDARY
-DO i=2,nim
-  ij=li(i)+nj
-  lamvisc(ij) = -26.99 + 0.09*t(ij) !visc !/(one + viscgamma*(t(ij) - tref))
-ENDDO
+  !--NORTH BOUNDARY
+  DO i=2,nim
+    ij=li(i)+nj
+    gamdot = sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)
+    IF(gamdot > zero)THEN
+      gamdot = visc*SQRT(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)**nm1
+      lamvisc(ij) = MIN(real_1e2,MAX(gamdot,real_1em6))
+    ELSE
+      lamvisc(ij) = visc
+    ENDIF
+  ENDDO
 
-!--SOUTH BOUNDARY (ISOTHERMAL WALL, NON-ZERO DIFFUSIVE FLUX)
-DO i=2,nim
-  ij=li(i)+1
-  lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref))
-ENDDO
+  !--SOUTH BOUNDARY 
+  DO i=2,nim
+    ij=li(i)+1
+    gamdot = sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)
+    IF(gamdot > zero)THEN
+      gamdot = visc*SQRT(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)**nm1
+      lamvisc(ij) = MIN(real_1e2,MAX(gamdot,real_1em6))
+    ELSE
+      lamvisc(ij) = visc
+    ENDIF
+  ENDDO
 
-!--WEST BOUNDARY
-DO j=2,njm
-  ij=li(1)+j
-  lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref))
-ENDDO
+  !--WEST BOUNDARY
+  DO j=2,njm
+    ij=li(1)+j
+    gamdot = sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)
+    IF(gamdot > zero)THEN
+      gamdot = visc*SQRT(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)**nm1
+      lamvisc(ij) = MIN(real_1e2,MAX(gamdot,real_1em6))
+    ELSE
+      lamvisc(ij) = visc
+    ENDIF  
+  ENDDO
 
-
-!--EAST BOUNDARY
-IF(duct)THEN !--Outlet (zero grdient but t is not available use previous node)
+  !--EAST BOUDARY
   DO j=2,njm
     ij=li(ni)+j
-    lamvisc(ij) = -26.99 + 0.09*t(ij-nj) !/(one + viscgamma*(t(ij-nj) - tref))
-  END DO
-ELSE
-  IF(movingmesh)THEN !--Outlet
-    DO j=2,njm
-      ij=li(ni)+j
-      lamvisc(ij) = -26.99 + 0.09*t(ij-nj) !/(one + viscgamma*(t(ij-nj) - tref))
-    END DO
-  ELSE
-    !--EAST BOUNDARY
-    DO j=2,njm
-      ij=li(ni)+j
-      lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref))
-    ENDDO
-  ENDIF
+    gamdot = sqrt(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)
+    IF(gamdot > zero)THEN
+      gamdot = visc*SQRT(two*dux(ij)**2+two*dvy(ij)**2+(duy(ij)+dvx(ij))**2)**nm1
+      lamvisc(ij) = MIN(real_1e2,MAX(gamdot,real_1em6))
+    ELSE
+      lamvisc(ij) = visc
+    ENDIF   
+  ENDDO
+
 ENDIF
+!DO i = 2,nim
+!  DO j = 2,njm
+!    ij = li(i) + j
+!    lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref))
+!  ENDDO
+!ENDDO
+!
+!!--NORTH BOUNDARY
+!DO i=2,nim
+!  ij=li(i)+nj
+!  lamvisc(ij) = -26.99 + 0.09*t(ij) !visc !/(one + viscgamma*(t(ij) - tref))
+!ENDDO
+!
+!!--SOUTH BOUNDARY (ISOTHERMAL WALL, NON-ZERO DIFFUSIVE FLUX)
+!DO i=2,nim
+!  ij=li(i)+1
+!  lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref))
+!ENDDO
+!
+!!--WEST BOUNDARY
+!DO j=2,njm
+!  ij=li(1)+j
+!  lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref))
+!ENDDO
+!
+!
+!!--EAST BOUNDARY
+!IF(duct)THEN !--Outlet (zero grdient but t is not available use previous node)
+!  DO j=2,njm
+!    ij=li(ni)+j
+!    lamvisc(ij) = -26.99 + 0.09*t(ij-nj) !/(one + viscgamma*(t(ij-nj) - tref))
+!  END DO
+!ELSE
+!  IF(movingmesh)THEN !--Outlet
+!    DO j=2,njm
+!      ij=li(ni)+j
+!      lamvisc(ij) = -26.99 + 0.09*t(ij-nj) !/(one + viscgamma*(t(ij-nj) - tref))
+!    END DO
+!  ELSE
+!    !--EAST BOUNDARY
+!    DO j=2,njm
+!      ij=li(ni)+j
+!      lamvisc(ij) = -26.99 + 0.09*t(ij) !/(one + viscgamma*(t(ij) - tref))
+!    ENDDO
+!  ENDIF
+!ENDIF
 
 
 END SUBROUTINE fd_update_visc
