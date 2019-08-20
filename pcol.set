@@ -1,0 +1,23 @@
+Lid-driven cavity flow at Re = 1000, single-grid                           
+0 0 0 0
+f f t f f f f t f                    LREAD,LWRITE,LTEST,LOUTS,LOUTE,LTIME,DUCT
+5 3 5 5 5 5 1.e-4 2.e3 0.92      MAXIT,IMON,JMON,IPR,JPR,SORMAX,SLARGE,ALFA
+0.935 0.1 1.4 0.02 0. -981.0 0. 5. 5. 5.  DENSIT,VISC,PRM,GRAVX,GRAVY,BETA,TH,TC,TREF !--Th would be the inlet temp for duct problem
+0. 0. 0. 5.0 0.0 1 1.e0            UIN,VIN,PIN,TIN,ULID,TPER  ULID is the inlet velocity for the duct problem
+10000 50 0.00001 1                     ITST,NPRT,DT,GAMT
+t t t f                          (LCAL(I),I=1,NPHI)
+0.7 0.7 0.1 0.9                 (URF(I),I=1,NPHI)
+1.e-6 1.e-6 1.e-5 1.e-6                  (SOR(I),I=1,NPHI)
+1000 1000 1000 1000                          (NSW(I),I=1,NPHI)
+1. 1. 1. 1.                      (GDS(I),I=1,NPHI)
+f                               NAME OF FILE FOR UNSTEADY RESULTS
+f
+t f f f f f f t    		        PUTOBJ,READ_FD_GEOM,STATIONARY,FORCEDMOTION,MOVINGMESH,CALCSURFFORCE,CALCLOCALNUSSELT,ISOTHERM
+3				DELTALEN
+0.7 				FD_URF
+1				NSPHERE restriction : densitp should be the same
+1.e8 0. 0. 0. 0.
+50				SPHNPRT
+1.0 0.6 0.15 0.15 7.8 6.0 0. 1.4 0.2 0 	   OBJCENTX,OBJCENTY,OBJRADIUS,DENSITP,TP,BETAP,PRANDTLEP,OBJQP
+500 60 3				   NSURFPOINTS,NNUSSELTPOINT,MCELLPERCV
+0
